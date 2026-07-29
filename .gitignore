@@ -35,3 +35,6 @@ HovercraftUniverse/bin/release/*.dll
 HovercraftUniverse/data/Flash.ocx
 HovercraftUniverse/data/plugins_debug/
 HovercraftUniverse/data/plugins_release/
+
+# Ready-to-run v1.0 game (unpacked from the archived installer, see RUNNING.md)
+local-game/
