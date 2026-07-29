@@ -2,7 +2,7 @@
 
 A multiplayer 3D hovercraft racing game set in space, where players race between planets and asteroids — each with its own atmosphere, gravity level and physical properties. Built in C++ on Ogre3D and Havok Physics.
 
-Hovercraft Universe was developed in 2009–2010 by a student team at Hasselt University (Belgium) — the source credits Kristof Overdulve, Olivier Berghmans and Pieter-Jan Pintens, with Nick, Tobias and others appearing in the planning wiki — as project `uhasseltaacgua` on Google Code (SVN). This repository is a migration of that SVN trunk to GitHub. The game reached a working **v1.0** with an installer in June 2010; development stopped after that.
+Hovercraft Universe was developed in 2009–2010 by a student team at Hasselt University (Belgium) — Dirk Delahaye, Kristof Overdulve, Nick De Frangh, Olivier Berghmans, Pieter-Jan Pintens and Tobias Van Bladel — as project `uhasseltaacgua` on Google Code (SVN), for the course *Architectuur en Algoritmes van Computer Games*. This repository is a migration of that SVN trunk to GitHub. The game reached a working **v1.0** with an installer in June 2010 ([trailer](https://www.youtube.com/watch?v=rhufn_-8xO8)); development stopped after that. The original project was published under **GPL v3**.
 
 - **Wiki / documentation:** https://nickman87.github.io/hovercraftuniverse/ (migrated wiki, mostly Dutch — source in [`docs/wiki/`](docs/wiki/))
 - **Original project (archived):** https://code.google.com/archive/p/uhasseltaacgua/
@@ -89,6 +89,8 @@ The `HovercraftUniverse/dependencies/` folder is **not in the repository** — i
 ## Revival plan
 
 Goal: get the game running and buildable on modern hardware/software with the **least possible functionality change**. The strategy: first restore everything that still exists, then reproduce the original build exactly, and only then (optionally) swap out truly dead components.
+
+> **Progress:** Phase 0 is **done** (all 557 LFS assets restored and hash-verified; all 34 archive packages + the SVN source dump mirrored locally in `archive-mirror/`, pending GitHub Release upload). Phase 1's dependency/runtime layout is **done and scripted** (`scripts/bootstrap-dependencies.ps1`) — the actual VS2008 compile is deliberately deferred (no legacy toolchain on the dev machine; use a VM/sandbox if a period build is ever wanted). Phase 2's CMake conversion is **done** (see `HovercraftUniverse/CMakeLists.txt`).
 
 ### Phase 0 — Rescue all artifacts (do this first; nothing else works without it)
 

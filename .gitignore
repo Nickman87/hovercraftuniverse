@@ -26,3 +26,12 @@ docs/_site/
 # Local mirror of the Google Code Archive packages (see README, Phase 0) —
 # ~1.2 GB of installers/SDKs, to be published as a GitHub Release, not committed.
 archive-mirror/
+
+# Dependency SDKs and runtime binaries, reconstructed from archive-mirror
+# by scripts/bootstrap-dependencies.ps1 (see README, Phase 1/2) — never committed.
+HovercraftUniverse/dependencies/
+HovercraftUniverse/bin/debug/*.dll
+HovercraftUniverse/bin/release/*.dll
+HovercraftUniverse/data/Flash.ocx
+HovercraftUniverse/data/plugins_debug/
+HovercraftUniverse/data/plugins_release/
