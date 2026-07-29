@@ -1,0 +1,36 @@
+float4x4 matView;
+float4x4 matViewProjection;
+
+struct VS_INPUT 
+{
+   float4 Position: POSITION0;
+   float2 TexCoord: TEXCOORD0;
+   float3 Normal:   NORMAL0;
+};
+
+struct VS_OUTPUT 
+{
+   float4 Position: POSITION0;
+   float2 TexCoord: TEXCOORD0;
+   float3 Normal:   TEXCOORD1;
+   //float3 WorldSpace: TEXCOORD2;
+};
+
+VS_OUTPUT vs_main( VS_INPUT Input )
+{
+   VS_OUTPUT Output;
+
+   float4x4 matTransform = matView;
+
+   Output.Position = mul( Input.Position, matViewProjection );
+   Output.TexCoord = Input.TexCoord;
+   Output.Normal   = ( mul( Input.Normal, matTransform ) + 1.0f ) / 2.0f;
+
+   //Output.WorldSpace = Output.Position;
+
+   return( Output );
+   
+}
+
+
+

@@ -1,0 +1,1 @@
+START /B HovercraftUniverse.exe --server

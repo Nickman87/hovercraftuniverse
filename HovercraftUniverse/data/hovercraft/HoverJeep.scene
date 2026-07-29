@@ -1,0 +1,52 @@
+<scene formatVersion="1.0" upAxis="y" unitsPerMeter="39.3701" minOgreVersion="1.7" ogreMaxVersion="2.2.5" author="OgreMax Scene Exporter (www.ogremax.com)" application="3DS Max">
+    <environment>
+        <colourAmbient r="0.333333" g="0.333333" b="0.333333" />
+        <colourBackground r="0" g="0" b="0" />
+        <clipping near="0" far="100000" />
+    </environment>
+    <nodes>
+        <node name="hoverJeep">
+            <position x="0.000798045" y="5.84473e-008" z="-2.55481e-015" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="hoverJeep" castShadows="true" receiveShadows="true" meshFile="hoverJeep.mesh">
+                <userData>
+                    <![CDATA[<Hovercraft><Name>HoverJeep</Name><Description>Very good steering, average speed, low weight.</Description><OgreEntity>hoverJeep</OgreEntity><ProcessInterval>0.016</ProcessInterval><Speed>80</Speed><Mass>40</Mass><Acceleration>25</Acceleration><Steering>100</Steering></Hovercraft>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="ArmyShinyGreen" />
+                    <subentity index="1" materialName="JeepHoverHood" />
+                    <subentity index="2" materialName="JeepArmyColours" />
+                    <subentity index="3" materialName="Leather" />
+                    <subentity index="4" materialName="ShinyIron" />
+                    <subentity index="5" materialName="ZwartMetaal" />
+                    <subentity index="6" materialName="JeepGroen" />
+                    <subentity index="7" materialName="Default" />
+                    <subentity index="8" materialName="Koplamp" />
+                    <subentity index="9" materialName="Knipperlicht" />
+                    <subentity index="10" materialName="Glas" />
+                    <subentity index="11" materialName="Achterlicht" />
+                    <subentity index="12" materialName="dashboard" />
+                    <subentity index="13" materialName="HoverjeepTires" />
+                </subentities>
+            </entity>
+        </node>
+    </nodes>
+    <externals>
+        <item name="Seat">
+            <position x="0.0141909" y="0.205567" z="0.158774" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="0.0840639" y="0.0840639" z="0.0840639" />
+        </item>
+        <item name="Exhauster">
+            <position x="0.0141909" y="0.548214" z="2.47863" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="0.0840639" y="0.0840639" z="0.0840639" />
+        </item>
+        <item name="Front">
+            <position x="0.0141911" y="-0.353323" z="-3.46784" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="0.0840639" y="0.0840639" z="0.0840639" />
+        </item>
+    </externals>
+</scene>

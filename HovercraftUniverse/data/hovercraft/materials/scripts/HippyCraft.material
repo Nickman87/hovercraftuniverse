@@ -1,0 +1,120 @@
+
+material HippycraftBody
+{
+	receive_shadows off
+
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture hippycraftbody.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material HoverSteering
+{
+	receive_shadows off
+
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture steeringwheel.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material HoverSeat
+{
+	receive_shadows off
+
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture seat.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material HoverCogs
+{
+	receive_shadows off
+
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture cogsmetallic.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material Hovertires
+{
+	receive_shadows off
+
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture tires.jpg
+			}
+		}
+
+	}
+
+}
+
+

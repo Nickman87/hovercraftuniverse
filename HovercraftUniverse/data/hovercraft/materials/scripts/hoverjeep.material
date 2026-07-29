@@ -1,0 +1,302 @@
+
+material JeepGroen
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.486275 0.639216 0.4 1
+			diffuse 0.486275 0.639216 0.4 1
+			specular 0.269412 0.269412 0.269412 40 0
+		}
+
+	}
+
+}
+
+
+
+material Knipperlicht
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 1 1 0 1
+			diffuse 1 1 0 1
+			specular 0.269412 0.269412 0.269412 80 0
+			emissive 0.6 0.6 0.6 1
+		}
+
+	}
+
+}
+
+
+
+material Default
+{
+	receive_shadows off
+		
+	technique
+	{
+		pass
+		{
+			ambient 0.7 0.7 0.7 1
+			diffuse 0.7 0.7 0.7 1
+			specular 0.707 0.707 0.707 50 0
+		}
+
+	}
+
+}
+
+
+
+material Achterlicht
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.964706 0.054902 0.054902 1
+			diffuse 0.964706 0.054902 0.054902 1
+			specular 0.269412 0.269412 0.269412 80 0
+			emissive 0.6 0.6 0.6 1
+		}
+
+	}
+
+}
+
+
+
+material Koplamp
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.996078 1 0.972549 1
+			diffuse 0.996078 1 0.972549 1
+			specular 0.269412 0.269412 0.269412 80 0
+			emissive 0.6 0.6 0.6 1
+		}
+
+	}
+
+}
+
+
+
+material ZwartMetaal
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.4 0.4 0.4 1
+			diffuse 0.4 0.4 0.4 1
+			specular 0.269412 0.269412 0.269412 40 0
+		}
+
+	}
+
+}
+
+
+
+material Glas
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			specular 0.538824 0.538824 0.538824 80 0
+		}
+
+	}
+
+}
+
+
+
+material HoverjeepTires
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture hoverjeeptires.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material JeepArmyColours
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture jeeparmycolours.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material JeepHoverHood
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture jeephoverhood.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material ArmyShinyGreen
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0.468 0.468 0.468 19 0
+
+			texture_unit
+			{
+				texture armygreen.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material Leather
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture jeepseat.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material ShinyIron
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0.675 0.675 0.675 20 0
+
+			texture_unit
+			{
+				texture cogsmetallic.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material dashboard
+{
+	receive_shadows off
+	
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture jeepdashboard.jpg
+			}
+		}
+
+	}
+
+}
+
+

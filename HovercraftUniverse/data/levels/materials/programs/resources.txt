@@ -1,0 +1,6 @@
+G:\Hovercraft\HovercraftUniverse\data\levels
+G:\Hovercraft\HovercraftUniverse\data\levels\materials\
+G:\Hovercraft\HovercraftUniverse\data\levels\materials\programs
+G:\Hovercraft\HovercraftUniverse\data\levels\SimpleTrack2\materials\scripts
+G:\Hovercraft\HovercraftUniverse\data\levels\SimpleTrack2\textures
+G:\Hovercraft\HovercraftUniverse\data\levels\SimpleTrack2\models

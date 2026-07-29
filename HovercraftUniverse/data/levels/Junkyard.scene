@@ -1,0 +1,1045 @@
+<scene formatVersion="1.0" upAxis="y" unitsPerMeter="39.3701" minOgreVersion="1.7" ogreMaxVersion="2.2.5" author="OgreMax Scene Exporter (www.ogremax.com)" application="3DS Max">
+    <userData>
+        <![CDATA[<Track><Name>Junk Yard</Name><MinimumPlayers>0</MinimumPlayers><MaximumPlayers>6</MaximumPlayers><PathFileName>junkyard.path</PathFileName><PhysicsFileName>junkyard.hkx</PhysicsFileName></Track>]]>
+</userData>
+    <environment>
+        <colourAmbient r="0.12549" g="0.12549" b="0.12549" />
+        <colourBackground r="0" g="0" b="0" />
+        <clipping near="0" far="100000" />
+        <shadows technique="textureAdditive" farDistance="100000">
+            <colourShadow r="0.25098" g="0.25098" b="0.25098" />
+        </shadows>
+    </environment>
+    <nodes>
+        <node name="Camera01">
+            <position x="-1032.37" y="37.0786" z="88.3239" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0" qy="-0.489327" qz="2.98023e-008" qw="0.8721" />
+            <camera name="Camera01" fov="0.602557">
+                <clipping near="1" far="1000" />
+            </camera>
+        </node>
+        <node name="Asteroid01">
+            <position x="0" y="0" z="0" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Asteroid01" castShadows="true" receiveShadows="true" meshFile="Asteroid01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Asteroid01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Asteroid01" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Rock01">
+            <position x="-412.307" y="47.3561" z="-102.947" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="1.88642e-009" qy="-1.12407e-039" qz="-2.46519e-032" qw="1" />
+            <entity name="Rock01" castShadows="true" receiveShadows="true" meshFile="Rock01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Rock01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Rock" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Check01">
+            <position x="-63.4644" y="37.5228" z="-6.66379" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0774659" qy="-0.703366" qz="0.0682675" qw="0.703289" />
+            <entity name="Check01" castShadows="true" receiveShadows="true" meshFile="Check01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Check01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="CheckPoint2" />
+                    <subentity index="1" materialName="CheckPoint1" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Asteroid02">
+            <position x="-534.423" y="2.26406" z="-82.0312" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="-0.160717" qz="7.02515e-009" qw="0.987001" />
+            <entity name="Asteroid02" castShadows="true" receiveShadows="true" meshFile="Asteroid02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Asteroid02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Asteroid02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Engine01">
+            <position x="-0.115354" y="47.7133" z="-31.2638" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.639301" qy="0.0430016" qz="-0.18225" qw="0.745808" />
+            <entity name="Engine01" castShadows="true" receiveShadows="true" meshFile="Engine01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Engine01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Engine" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wing_Part_02">
+            <position x="-102.501" y="33.2504" z="-43.5321" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="4.0899e-008" qz="0.93566" qw="0.352903" />
+            <entity name="Wing_Part_02" castShadows="true" receiveShadows="true" meshFile="Wing_Part_02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wing_Part_02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wing" />
+                    <subentity index="1" materialName="Wing-Engine" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wing_Part_01">
+            <position x="-102.435" y="26.4598" z="-32.8902" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Wing_Part_01" castShadows="true" receiveShadows="true" meshFile="Wing_Part_01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wing_Part_01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wing" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Check02">
+            <position x="-473.667" y="46.7041" z="-46.0181" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0101174" qy="-0.819057" qz="-0.0264471" qw="0.573013" />
+            <entity name="Check02" castShadows="true" receiveShadows="true" meshFile="Check02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Check02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="CheckPoint2" />
+                    <subentity index="1" materialName="CheckPoint1" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Fighter">
+            <position x="-552.8" y="57.9239" z="-156.438" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.455816" qy="0.12889" qz="-0.239636" qw="0.847463" />
+            <entity name="Fighter" castShadows="true" receiveShadows="true" meshFile="Fighter.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Fighter_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Fighter" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Jump01">
+            <position x="-148.891" y="21.0134" z="-20.245" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.13454" qy="0.990908" qz="-5.34715e-008" qw="-7.48115e-008" />
+            <entity name="Jump01" castShadows="true" receiveShadows="true" meshFile="Jump01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Jump01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Jump02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Rock02">
+            <position x="-132.085" y="48.2159" z="31.3811" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="1.88642e-009" qy="-1.12407e-039" qz="-2.46519e-032" qw="1" />
+            <entity name="Rock02" castShadows="true" receiveShadows="true" meshFile="Rock02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Rock02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Rock" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Jump02">
+            <position x="-639.661" y="87.5321" z="-109.811" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.357114" qy="0.894646" qz="0.105758" qw="0.246764" />
+            <entity name="Jump02" castShadows="true" receiveShadows="true" meshFile="Jump02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Jump02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Jump02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Planet01">
+            <position x="-1274.65" y="275.313" z="-464.281" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Planet01" castShadows="true" receiveShadows="true" meshFile="Planet01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Planet01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Planet01" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Check03">
+            <position x="-1300.71" y="500.962" z="-470.413" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0158898" qy="-0.70704" qz="0.0682815" qw="0.70369" />
+            <entity name="Check03" castShadows="true" receiveShadows="true" meshFile="Check03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Check03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="CheckPoint2" />
+                    <subentity index="1" materialName="CheckPoint1" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Rock03">
+            <position x="-1076.86" y="193.855" z="-356.336" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="3.9616e-008" qz="0.906308" qw="-0.422618" />
+            <entity name="Rock03" castShadows="true" receiveShadows="true" meshFile="Rock03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Rock03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Rock" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Omni01">
+            <position x="318.891" y="1428.9" z="-73.0671" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.707107" qy="-0" qz="-0" qw="-0.707107" />
+            <light name="Omni01" visible="true" type="point" castShadows="true" power="50">
+                <colourDiffuse r="0.592157" g="0.85098" b="0.972549" />
+                <colourSpecular r="1" g="1" b="1" />
+                <lightAttenuation range="200" constant="1" linear="0" quadric="0" />
+            </light>
+        </node>
+        <node name="Omni04">
+            <position x="-2313.18" y="1484.77" z="-1030.72" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.707107" qy="-0" qz="-0" qw="-0.707107" />
+            <light name="Omni04" visible="true" type="point" castShadows="true" power="30">
+                <colourDiffuse r="0.627451" g="1" b="0.627451" />
+                <colourSpecular r="1" g="1" b="1" />
+                <lightAttenuation range="200" constant="1" linear="0" quadric="0" />
+            </light>
+        </node>
+        <node name="Box01">
+            <position x="-522.809" y="43.6577" z="-66.9745" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Box01" castShadows="true" receiveShadows="true" meshFile="Box01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Box01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Box" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Box02">
+            <position x="-522.809" y="43.6577" z="-64.0289" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Box02" castShadows="true" receiveShadows="true" meshFile="Box02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Box02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Box" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Box03">
+            <position x="-522.809" y="45.7755" z="-65.4743" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Box03" castShadows="true" receiveShadows="true" meshFile="Box03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Box03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Box" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Barrel01">
+            <position x="-543.567" y="43.2778" z="-56.0745" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Barrel01" castShadows="true" receiveShadows="true" meshFile="Barrel01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Barrel01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="11-Default" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Barrel02">
+            <position x="-543.567" y="43.2778" z="-53.2546" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="-0.707107" qz="3.09086e-008" qw="0.707107" />
+            <entity name="Barrel02" castShadows="true" receiveShadows="true" meshFile="Barrel02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Barrel02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="11-Default" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Barrel03">
+            <position x="-540.656" y="42.4224" z="-54.1578" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.5" qy="-0.5" qz="0.5" qw="0.5" />
+            <entity name="Barrel03" castShadows="true" receiveShadows="true" meshFile="Barrel03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Barrel03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="11-Default" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Asteroid03">
+            <position x="919.297" y="63.1464" z="-22.9158" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Asteroid03" castShadows="true" receiveShadows="true" meshFile="Asteroid03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Asteroid03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Asteroid03" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Omni06">
+            <position x="730.268" y="-149.797" z="-8.05148" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.707107" qy="-0" qz="-0" qw="-0.707107" />
+            <light name="Omni06" visible="true" type="point" castShadows="true" power="30">
+                <colourDiffuse r="1" g="1" b="1" />
+                <colourSpecular r="1" g="1" b="1" />
+                <lightAttenuation range="200" constant="1" linear="0" quadric="0" />
+            </light>
+        </node>
+        <node name="tree01">
+            <position x="735.94" y="147.569" z="63.3259" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="tree01" castShadows="true" receiveShadows="true" meshFile="tree01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tree01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="06-Default" />
+                    <subentity index="1" materialName="Leaves3" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tree02">
+            <position x="806.139" y="147.368" z="41.0381" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.196161" qy="-0.4126" qz="-0.0914713" qw="0.884825" />
+            <entity name="tree02" castShadows="true" receiveShadows="true" meshFile="tree02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tree02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="06-Default" />
+                    <subentity index="1" materialName="Leaves3" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tree03">
+            <position x="735.94" y="184.34" z="-106.981" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="tree03" castShadows="true" receiveShadows="true" meshFile="tree03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tree03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="06-Default" />
+                    <subentity index="1" materialName="Leaves3" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tree2_01">
+            <position x="801.762" y="180.829" z="-100.945" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0871557" qy="0" qz="0" qw="0.996195" />
+            <entity name="tree2_01" castShadows="true" receiveShadows="true" meshFile="tree2_01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tree2_01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="06-Default" />
+                    <subentity index="1" materialName="Leaves3" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tree2_02">
+            <position x="901.681" y="161.969" z="-77.2664" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.300706" qy="0" qz="0" qw="0.953717" />
+            <entity name="tree2_02" castShadows="true" receiveShadows="true" meshFile="tree2_02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tree2_02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="06-Default" />
+                    <subentity index="1" materialName="Leaves3" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tunnel01">
+            <position x="1025.12" y="-7.0274" z="-47.0633" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0271624" qy="-3.17748e-008" qz="0.999631" qw="2.0507e-009" />
+            <entity name="tunnel01" castShadows="true" receiveShadows="true" meshFile="tunnel01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tunnel01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Tunnel" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Jump03">
+            <position x="1274.82" y="2.39396" z="-78.2504" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.0200718" qy="0.100145" qz="-0.272672" qw="0.95667" />
+            <entity name="Jump03" castShadows="true" receiveShadows="true" meshFile="Jump03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Jump03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Jump02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Asteroid04">
+            <position x="1683.18" y="-0.374156" z="-144.942" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <entity name="Asteroid04" castShadows="true" receiveShadows="true" meshFile="Asteroid04.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Asteroid04_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Asteroid04" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Omni08">
+            <position x="2441.43" y="600.881" z="-162.117" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.707107" qy="-0" qz="-0" qw="-0.707107" />
+            <light name="Omni08" visible="true" type="point" castShadows="true" power="40">
+                <colourDiffuse r="1" g="1" b="1" />
+                <colourSpecular r="1" g="1" b="1" />
+                <lightAttenuation range="200" constant="1" linear="0" quadric="0" />
+            </light>
+        </node>
+        <node name="Jump05">
+            <position x="513.632" y="129.11" z="38.0765" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="1.96213e-011" qy="4.35037e-008" qz="0.988497" qw="0.151239" />
+            <entity name="Jump05" castShadows="true" receiveShadows="true" meshFile="Jump05.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Jump05_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Jump02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tunnel02">
+            <position x="1713.46" y="-87.3463" z="-151.92" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.999631" qy="8.634e-010" qz="-0.0271625" qw="7.547e-008" />
+            <entity name="tunnel02" castShadows="true" receiveShadows="true" meshFile="tunnel02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tunnel02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Tunnel" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="tunnel03">
+            <position x="1783.31" y="53.5967" z="-154.659" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="-0.019736" qy="-0.0186624" qz="-0.726314" qw="0.686826" />
+            <entity name="tunnel03" castShadows="true" receiveShadows="true" meshFile="tunnel03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>tunnel03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Tunnel" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall01">
+            <position x="-131.246" y="22.9772" z="2.10573" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0.996563" qz="-4.35612e-008" qw="0.0828376" />
+            <entity name="Wall01" castShadows="true" receiveShadows="true" meshFile="Wall01.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall01_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall02">
+            <position x="-127.589" y="24.5067" z="-48.7548" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0" qy="0.312019" qz="-1.36388e-008" qw="0.950076" />
+            <entity name="Wall02" castShadows="true" receiveShadows="true" meshFile="Wall02.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall02_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall03">
+            <position x="-629.732" y="67.6633" z="-74.5521" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.265698" qy="0.870578" qz="0.120884" qw="0.396087" />
+            <entity name="Wall03" castShadows="true" receiveShadows="true" meshFile="Wall03.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall03_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall04">
+            <position x="-1263.71" y="498.735" z="-439.056" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0887654" qy="0.975676" qz="0.0693991" qw="0.188043" />
+            <entity name="Wall04" castShadows="true" receiveShadows="true" meshFile="Wall04.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall04_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall05">
+            <position x="-1233.12" y="485.71" z="-432.992" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.284985" qy="0.953261" qz="0.091135" qw="0.0420957" />
+            <entity name="Wall05" castShadows="true" receiveShadows="true" meshFile="Wall05.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall05_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall06">
+            <position x="697.165" y="116.889" z="-12.5543" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0296315" qy="0.310609" qz="0.0902257" qw="0.945782" />
+            <entity name="Wall06" castShadows="true" receiveShadows="true" meshFile="Wall06.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall06_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Wall07">
+            <position x="720.482" y="123.355" z="-32.9458" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.0250673" qy="0.408167" qz="0.104172" qw="0.906598" />
+            <entity name="Wall07" castShadows="true" receiveShadows="true" meshFile="Wall07.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Wall07_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Wall" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Jump06">
+            <position x="1564.98" y="80.8724" z="-136.517" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.170984" qy="0.981505" qz="-0.0292759" qw="-0.0809692" />
+            <entity name="Jump06" castShadows="true" receiveShadows="true" meshFile="Jump06.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Jump06_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="Jump02" />
+                </subentities>
+            </entity>
+        </node>
+        <node name="Check04">
+            <position x="741.265" y="125.461" z="8.65775" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.016615" qy="-0.598229" qz="0.11013" qw="0.793547" />
+            <entity name="Check04" castShadows="true" receiveShadows="true" meshFile="Check04.mesh">
+                <userData>
+                    <![CDATA[<OgreEntity><GameEntity>Check04_ent</GameEntity></OgreEntity>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="CheckPoint2" />
+                    <subentity index="1" materialName="CheckPoint1" />
+                </subentities>
+            </entity>
+        </node>
+    </nodes>
+    <externals>
+        <item name="Asteroid01_ent">
+            <userData>
+                <![CDATA[<Asteroid><OgreEntity>Asteroid01</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Begin</Name><Gravity>100</Gravity><AsteroidType>3</AsteroidType></Asteroid>]]>
+</userData>
+            <position x="0" y="0" z="0" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="596.782" y="157.88" z="302.386" />
+        </item>
+        <item name="Rock01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Rock01</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-412.307" y="47.3561" z="-102.947" />
+            <rotation qx="1.88641e-009" qy="-1.12407e-039" qz="-2.46519e-032" qw="1" />
+            <scale x="11.9579" y="14.0575" z="13.4562" />
+        </item>
+        <item name="Check01_ent">
+            <userData>
+                <![CDATA[<CheckPoint><OgreEntity>Check01</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Half way</Name><Number>3</Number></CheckPoint>]]>
+</userData>
+            <position x="-63.4644" y="37.5228" z="-6.66379" />
+            <rotation qx="0.0774659" qy="-0.703366" qz="0.0682675" qw="0.703289" />
+            <scale x="34.6003" y="10.3397" z="15.2678" />
+        </item>
+        <item name="Asteroid02_ent">
+            <userData>
+                <![CDATA[<Asteroid><OgreEntity>Asteroid02</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Middle</Name><Gravity>75</Gravity><AsteroidType>0</AsteroidType></Asteroid>]]>
+</userData>
+            <position x="-534.423" y="2.26406" z="-82.0311" />
+            <rotation qx="-1.12485e-016" qy="-0.160717" qz="7.02515e-009" qw="0.987001" />
+            <scale x="593.321" y="251.626" z="370.778" />
+        </item>
+        <item name="Engine01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Engine01</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-0.115353" y="47.7133" z="-31.2638" />
+            <rotation qx="-0.639301" qy="0.0430015" qz="-0.18225" qw="0.745808" />
+            <scale x="14.0085" y="17.1423" z="13.2304" />
+        </item>
+        <item name="Wing_Part_02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wing_Part_02</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-102.501" y="33.2504" z="-43.5321" />
+            <rotation qx="-1.42388e-015" qy="4.0899e-008" qz="0.93566" qw="0.352902" />
+            <scale x="4" y="1.4856" z="5.06524" />
+        </item>
+        <item name="Wing_Part_01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wing_Part_01</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-102.435" y="26.4598" z="-32.8902" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="4" y="1.32026" z="5.92063" />
+        </item>
+        <item name="Check02_ent">
+            <userData>
+                <![CDATA[<CheckPoint><OgreEntity>Check02</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Middle</Name><Number>4</Number></CheckPoint>]]>
+</userData>
+            <position x="-473.667" y="46.7041" z="-46.0181" />
+            <rotation qx="0.0101174" qy="-0.819057" qz="-0.0264471" qw="0.573013" />
+            <scale x="34.6003" y="10.3397" z="15.2678" />
+        </item>
+        <item name="Fighter_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Fighter</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-552.8" y="57.9238" z="-156.438" />
+            <rotation qx="0.455816" qy="0.12889" qz="-0.239636" qw="0.847463" />
+            <scale x="55.1844" y="15.0859" z="40.5569" />
+        </item>
+        <item name="Jump01_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>Jump01</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>650</Boost><Gain>20</Gain></Boost>]]>
+</userData>
+            <position x="-148.891" y="21.013" z="-20.245" />
+            <rotation qx="0.13454" qy="0.990908" qz="-5.34715e-008" qw="-7.48115e-008" />
+            <scale x="87.4561" y="2" z="35" />
+        </item>
+        <item name="Rock02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Rock02</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-132.085" y="48.2159" z="31.3811" />
+            <rotation qx="1.88642e-009" qy="-1.12407e-039" qz="-2.46519e-032" qw="1" />
+            <scale x="40.8405" y="43.8692" z="42.59" />
+        </item>
+        <item name="Jump02_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>Jump02</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>600</Boost><Gain>50</Gain></Boost>]]>
+</userData>
+            <position x="-639.661" y="87.5321" z="-109.811" />
+            <rotation qx="0.357114" qy="0.894646" qz="0.105758" qw="0.246764" />
+            <scale x="50" y="2" z="35" />
+        </item>
+        <item name="Planet01_ent">
+            <userData>
+                <![CDATA[<Asteroid><OgreEntity>Planet01</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Big blob</Name><Gravity>60</Gravity><AsteroidType>3</AsteroidType></Asteroid>]]>
+</userData>
+            <position x="-1274.65" y="275.314" z="-464.281" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="680.79" y="680.79" z="680.79" />
+        </item>
+        <item name="Check03_ent">
+            <userData>
+                <![CDATA[<Finish><OgreEntity>Check03</OgreEntity><ProcessInterval>-1</ProcessInterval></Finish>]]>
+</userData>
+            <position x="-1300.71" y="500.962" z="-470.413" />
+            <rotation qx="0.0158898" qy="-0.70704" qz="0.0682815" qw="0.70369" />
+            <scale x="34.6003" y="10.3397" z="15.2678" />
+        </item>
+        <item name="Rock03_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Rock03</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-1076.86" y="193.855" z="-356.336" />
+            <rotation qx="0" qy="3.9616e-008" qz="0.906308" qw="-0.422618" />
+            <scale x="70.1387" y="78.2482" z="75.7921" />
+        </item>
+        <item name="Box01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Box01</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-522.809" y="43.6577" z="-66.9745" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="2" y="2" z="2" />
+        </item>
+        <item name="Box02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Box02</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-522.809" y="43.6577" z="-64.0289" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="2" y="2" z="2" />
+        </item>
+        <item name="Box03_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Box03</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-522.809" y="45.7755" z="-65.4743" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="2" y="2" z="2" />
+        </item>
+        <item name="Barrel01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Barrel01</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-543.567" y="43.2778" z="-56.0745" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="2" y="3" z="1.90211" />
+        </item>
+        <item name="Barrel02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Barrel02</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-543.567" y="43.2778" z="-53.2545" />
+            <rotation qx="-1.25607e-015" qy="-0.707107" qz="3.09086e-008" qw="0.707107" />
+            <scale x="2" y="3" z="1.90211" />
+        </item>
+        <item name="Barrel03_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Barrel03</OgreEntity><ProcessInterval>0.0333333</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-540.656" y="42.4224" z="-54.1578" />
+            <rotation qx="-0.5" qy="-0.5" qz="0.5" qw="0.5" />
+            <scale x="2" y="3" z="1.90211" />
+        </item>
+        <item name="Asteroid03_ent">
+            <userData>
+                <![CDATA[<Asteroid><OgreEntity>Asteroid03</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Turning Point</Name><Gravity>32</Gravity><AsteroidType>2</AsteroidType></Asteroid>]]>
+</userData>
+            <position x="919.297" y="63.1464" z="-22.9158" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1137.05" y="353.754" z="507.205" />
+        </item>
+        <item name="tree01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>tree01</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="735.94" y="147.569" z="63.3259" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="60.9116" y="44.2947" z="57.7092" />
+        </item>
+        <item name="tree02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>tree02</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="806.139" y="147.368" z="41.0381" />
+            <rotation qx="-0.196161" qy="-0.4126" qz="-0.0914713" qw="0.884825" />
+            <scale x="60.9116" y="44.2947" z="57.7092" />
+        </item>
+        <item name="tree03_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>tree03</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="735.94" y="184.34" z="-106.981" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="60.9116" y="44.2947" z="57.7092" />
+        </item>
+        <item name="tree2_01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>tree2_01</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="801.762" y="180.829" z="-100.945" />
+            <rotation qx="0.0871558" qy="0" qz="0" qw="0.996195" />
+            <scale x="38.598" y="26.634" z="37.2032" />
+        </item>
+        <item name="tree2_02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>tree2_02</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="901.681" y="161.969" z="-77.2664" />
+            <rotation qx="0.300706" qy="0" qz="0" qw="0.953717" />
+            <scale x="38.598" y="26.634" z="37.2032" />
+        </item>
+        <item name="tunnel01_ent">
+            <userData>
+                <![CDATA[<CheckPoint><Name>Start</Name><Number>0</Number><OgreEntity>tunnel01</OgreEntity><ProcessInterval>-1</ProcessInterval></CheckPoint>]]>
+</userData>
+            <position x="1025.12" y="-7.0274" z="-47.0633" />
+            <rotation qx="0.0271624" qy="-3.17748e-008" qz="0.999631" qw="2.0507e-009" />
+            <scale x="199.881" y="50" z="120" />
+        </item>
+        <item name="Jump03_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>Jump03</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>600</Boost><Gain>100</Gain></Boost>]]>
+</userData>
+            <position x="1274.82" y="2.39388" z="-78.2505" />
+            <rotation qx="-0.0200718" qy="0.100145" qz="-0.272672" qw="0.95667" />
+            <scale x="84.1554" y="5" z="50.9361" />
+        </item>
+        <item name="Start00">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>0</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="657.857" y="-4.41476" z="-52.4766" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Start01">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>1</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="645.996" y="-3.05053" z="-31.1135" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Start02">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>2</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="632.85" y="-4.41476" z="-52.4766" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Start03">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>3</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="620.989" y="-3.05053" z="-31.1135" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Start04">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>4</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="608.656" y="-4.41476" z="-52.4766" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Start05">
+            <userData>
+                <![CDATA[<StartPosition><PlayerNumber>5</PlayerNumber></StartPosition>]]>
+</userData>
+            <position x="596.795" y="-3.05053" z="-31.1135" />
+            <rotation qx="0.747998" qy="-0.0211456" qz="-0.662935" qw="0.0238589" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Asteroid04_ent">
+            <userData>
+                <![CDATA[<Asteroid><OgreEntity>Asteroid04</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Turning point</Name><Gravity>45</Gravity><AsteroidType>0</AsteroidType></Asteroid>]]>
+</userData>
+            <position x="1683.18" y="-0.374156" z="-144.942" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="282.202" y="275.657" z="285.012" />
+        </item>
+        <item name="Jump05_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>Jump05</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>600</Boost><Gain>30</Gain></Boost>]]>
+</userData>
+            <position x="513.632" y="129.11" z="38.0765" />
+            <rotation qx="1.96949e-010" qy="4.48819e-008" qz="0.988497" qw="0.151239" />
+            <scale x="84.1554" y="5" z="50.9362" />
+        </item>
+        <item name="tunnel02_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>tunnel02</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>300</Boost><Gain>0</Gain></Boost>]]>
+</userData>
+            <position x="1713.46" y="-87.3463" z="-151.92" />
+            <rotation qx="0.999631" qy="8.634e-010" qz="-0.0271625" qw="7.547e-008" />
+            <scale x="199.149" y="77.4366" z="122.374" />
+        </item>
+        <item name="tunnel03_ent">
+            <userData>
+                <![CDATA[<CheckPoint><OgreEntity>tunnel03</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Turn</Name><Number>1</Number></CheckPoint>]]>
+</userData>
+            <position x="1783.31" y="53.5391" z="-160.78" />
+            <rotation qx="-0.0197362" qy="-0.0186622" qz="-0.726314" qw="0.686826" />
+            <scale x="194.901" y="97.5405" z="122.374" />
+        </item>
+        <item name="Wall01_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall01</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-131.246" y="22.9772" z="2.10573" />
+            <rotation qx="2.2281e-016" qy="0.996563" qz="-4.35612e-008" qw="0.0828376" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall02_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall02</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-127.589" y="24.5067" z="-48.7548" />
+            <rotation qx="0" qy="0.312019" qz="-1.36388e-008" qw="0.950076" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall03_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall03</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-629.732" y="67.6633" z="-74.5521" />
+            <rotation qx="0.265698" qy="0.870578" qz="0.120884" qw="0.396087" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall04_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall04</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-1263.71" y="498.735" z="-439.056" />
+            <rotation qx="0.0887654" qy="0.975676" qz="0.0693991" qw="0.188043" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall05_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall05</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="-1233.12" y="485.71" z="-432.992" />
+            <rotation qx="0.284985" qy="0.953261" qz="0.091135" qw="0.0420957" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall06_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall06</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="697.165" y="116.889" z="-12.5542" />
+            <rotation qx="0.0296315" qy="0.310609" qz="0.0902257" qw="0.945782" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Wall07_ent">
+            <userData>
+                <![CDATA[<StaticBody><OgreEntity>Wall07</OgreEntity><ProcessInterval>-1</ProcessInterval></StaticBody>]]>
+</userData>
+            <position x="720.482" y="123.355" z="-32.9457" />
+            <rotation qx="0.0250673" qy="0.408167" qz="0.104172" qw="0.906598" />
+            <scale x="30" y="10" z="5" />
+        </item>
+        <item name="Jump06_ent">
+            <userData>
+                <![CDATA[<Boost><OgreEntity>Jump06</OgreEntity><ProcessInterval>-1</ProcessInterval><Boost>400</Boost><Gain>200</Gain></Boost>]]>
+</userData>
+            <position x="1564.98" y="80.8724" z="-136.517" />
+            <rotation qx="0.170984" qy="0.981505" qz="-0.0292759" qw="-0.0809692" />
+            <scale x="219.784" y="10.4888" z="147.151" />
+        </item>
+        <item name="Check04_ent">
+            <userData>
+                <![CDATA[<CheckPoint><OgreEntity>Check04</OgreEntity><ProcessInterval>-1</ProcessInterval><Name>Turned</Name><Number>2</Number></CheckPoint>]]>
+</userData>
+            <position x="741.265" y="125.461" z="8.65787" />
+            <rotation qx="0.016615" qy="-0.598229" qz="0.11013" qw="0.793547" />
+            <scale x="34.6003" y="10.3397" z="15.2678" />
+        </item>
+        <item name="Reset00">
+            <userData>
+                <![CDATA[<ResetSpawn><Checkpoint>0</Checkpoint></ResetSpawn>]]>
+</userData>
+            <position x="918.634" y="-1.72516e-006" z="-39.4672" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Reset01">
+            <userData>
+                <![CDATA[<ResetSpawn><Checkpoint>1</Checkpoint></ResetSpawn>]]>
+</userData>
+            <position x="1720.86" y="-81.7266" z="-151.667" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Reset02">
+            <userData>
+                <![CDATA[<ResetSpawn><Checkpoint>2</Checkpoint></ResetSpawn>]]>
+</userData>
+            <position x="918.634" y="137.447" z="-16.9373" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Reset03">
+            <userData>
+                <![CDATA[<ResetSpawn><Checkpoint>3</Checkpoint></ResetSpawn>]]>
+</userData>
+            <position x="-19.6677" y="52.2876" z="-16.9372" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1" y="1" z="1" />
+        </item>
+        <item name="Reset04">
+            <userData>
+                <![CDATA[<ResetSpawn><Checkpoint>4</Checkpoint></ResetSpawn>]]>
+</userData>
+            <position x="-423.492" y="52.2876" z="-40.1574" />
+            <rotation qx="0" qy="0" qz="0" qw="1" />
+            <scale x="1" y="1" z="1" />
+        </item>
+    </externals>
+</scene>

@@ -1,0 +1,13 @@
+vertex_program asteroidVS cg
+{
+	source asteroidVS.cg
+	profiles vs_1_1
+	entry_point vs_main
+}
+
+fragment_program asteroidPS cg
+{
+	source asteroidPS.cg
+	profiles ps_2_0
+	entry_point ps_main
+}

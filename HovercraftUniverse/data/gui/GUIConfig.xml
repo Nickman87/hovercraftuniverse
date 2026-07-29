@@ -1,0 +1,102 @@
+<?xml version="1.0" standalone=no>
+<!-- 
+	Possible relative positions:
+		Left, TopLeft, TopCenter, TopRight, Right,
+		BottomRight, BottomCenter, BottomLeft, Center
+	For absolute positioning:
+		left and top distance is needed, can be percentage
+		
+	Percentages used in width/height will only be calculated relatively
+	in respect to other objects when using relative positioning.
+	ex.:
+		Chat window -> BottomLeft - width 100%
+		Speedometer -> BottomRight - width 120
+		==> Chat windo width = screenWidth - 120 - Padding
+-->
+<GUI mediaPath="gui">
+	<HUD min_res_width="800" min_res_height="600" max_res_width="1680" max_res_height="1050">
+		<!--
+			Possible types:
+				speedometer
+				position
+				positionBar
+				timer
+				direction
+				chat
+				timeBehind
+		-->
+		<element type="speedometer" file="speedometer.swf">
+			<size>
+				<min width="180" height="180" />
+				<max width="360" height="360" />
+			</size>
+			<position>
+				<relative val="BottomRight" />
+			</position>
+		</element>
+		<element type="position" file="position.swf">
+			<size>
+				<min width="228" height="80" />
+				<max width="456" height="160" />
+			</size>
+			<position>
+				<relative val="TopLeft" />
+			</position>
+		</element>
+		
+	<!--
+		This might require some extra attention
+	-->
+	<!--
+		<element type="positionBar" file="positionBar.swf">
+			<size>
+				<min width="114" height="40" />
+				<max width="340" height="120" />
+			</size>
+			<position>
+				<relative val="TopLeft" />
+			</position>
+		</element>
+	-->	
+
+		<element type="timer" file="lapTimer.swf">
+			<size>
+				<min width="174" height="40" />
+				<max width="520" height="120" />
+			</size>
+			<position>
+				<relative val="TopRight" />
+			</position>
+		</element>
+		
+		<element type="direction" file="direction.swf">
+			<size>
+				<min width="150" height="100" />
+				<max width="450" height="300" />
+			</size>
+			<position>
+				<relative val="TopCenter" />
+			</position>
+		</element>
+		
+		<element type="chat" file="chat.swf">
+			<size>
+				<min width="100%" height="180" />
+				<max width="100%" height="180" />
+			</size>
+			<position>
+				<relative val="BottomLeft" />
+			</position>
+		</element>
+		
+		<element type="timeBehind" file="timeBehind.swf">
+			<size>
+				<min width="120" height="40" />
+				<max width="300" height="100" />
+			</size>
+			<position>
+				<relative val="Center" />
+			</position>
+		</element>
+	</HUD>
+</GUI>

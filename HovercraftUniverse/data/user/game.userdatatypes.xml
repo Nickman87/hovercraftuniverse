@@ -1,0 +1,167 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+Userdata types are extensions atached to ogre scene nodes.
+They contain extra info and that will be filled in the editor (3dsmax).
+The info is returned as xml when the exported data is read. See the example for clearification.
+
+example:
+
+This type here:
+
+<class name="CheckPoint" usage="object">
+  <data name="Name" displayName="Name" groupName="Info" type="string"/>
+  <data name="Number" displayName="Number" groupName="Info" type="int"/>
+</class>
+
+Wil generate xml when loaded:
+
+<CheckPoint>
+<Name>blabla</Name>
+<Number>10</Number>
+</CheckPoint>
+
+Passing this xml node to the constructor of the custom object allows it to fill its members.
+For an example you can look at the Hovercraft.h/Hovercraft.cpp
+-->
+<userDataTypes>
+  <include file="types.userdatatypes.xml"/>
+
+  <class name="OgreEntity" usage="object">
+    <data name="GameEntity" displayName="Game Entity" type="string" groupName="Ogre"/>
+  </class>
+
+  <class name="GameEntity" usage="object">
+    <data name="OgreEntity" displayName="Ogre Entity Name" type="string" default="" groupName="Ogre"/>
+    <data name="ProcessInterval" displayName="Process Interval" type="float" default="-1.0" minValue="-1.0" groupName="Ogre"/>
+  </class>  
+  
+  <!-- 
+    Hovercraft 
+  -->
+  <class name="Hovercraft" super="GameEntity" usage="object">
+    <data name="Name" displayName="Name" groupName="Info" type="string"/>
+    <data name="Description" displayName="Description" groupName="Info" type="string" editWidth="200" editHeight="100"/>
+    <data name="Speed" displayName="Speed" groupName="Physics" type="float" default="0.0" minValue="0" maxValue="5000"/> 
+    <data name="Mass" displayName="Mass" groupName="Physics" type="float" default="0.0" minValue="0" maxValue="5000"/>
+    <data name="Acceleration" displayName="Acceleration" groupName="Physics" type="float" default="0.0" minValue="0" maxValue="5000"/>
+	  <data name="Steering" displayName="Steering" groupName="Physics" type="float" default="0.0" minValue="0" maxValue="5000"/>
+  </class>
+  
+  <!-- 
+    Track 
+    A track describes is a collection of all the enities in the world.
+    It has some properties that can be used in the user interface so that players can pick the
+    track they like.
+  -->
+  <class name="Track" usage="scene">
+	<data name="Name" displayName="Name" groupName="Info" type="string"/>
+    <data name="MinimumPlayers" displayName="MinimumPlayers" groupName="Info" type="int" default="0" minValue="0" maxValue="32"/>
+    <data name="MaximumPlayers" displayName="MaximumPlayers" groupName="Info" type="int" default="0" minValue="0" maxValue="32"/>  
+    <data name="PhysicsFileName" displayName="PhysicsFileName" groupName="PhysicsFileName" type="string"/>
+	<data name="PathFileName" displayName="PathFileName" groupName="PathFileName" type="string"/>
+  </class>
+
+  <!-- 
+    Asteroid 
+    A asteroid representing some part of the track on which players can hover.
+    Each asteroid has its own gravity, type and name.
+  -->
+  <class name="Asteroid" super="GameEntity" usage="object">
+    <data name="Name" displayName="Name" groupName="Info" type="string"/>
+    <data name="Gravity" displayName="Gravity" groupName="Info" type="float"/>
+    <data name="AsteroidType" displayName="AsteroidType" groupName="Info" type="AsteroidType"/>
+  </class>
+
+  <!-- 
+  /**
+   * Start 
+   * A location in the world on where hovercrafts will be placed when the race begins.
+   */ 
+  -->
+  <class name="Start" super="GameEntity" usage="object">
+  </class>
+
+  <!-- 
+  /**
+   * StartPosition 
+   */ 
+  -->
+  <class name="StartPosition" usage="object">
+    <data name="PlayerNumber" displayName="PlayerNumber" groupName="Info" type="int" default="0" minValue="0" maxValue="32"/>
+  </class>
+  
+  <!--
+  /**
+   * Finish 
+   * A finish is a space that should be touched by the hovercraft to finish the race.
+   * It should only trigger when the player has passed all checkpoints.
+   */
+  -->
+  <class name="Finish" super="GameEntity" usage="object">
+  </class>
+
+  <!-- 
+  /**
+   * Checkpoint 
+   * A checkpoint is a space that should be touched by the hovercraft to win a race.
+   * A checkpoint might have a number to denote the order in which the player should pass the checkpoints.
+   */
+  -->
+  <class name="CheckPoint" super="GameEntity" usage="object">
+    <data name="Name" displayName="Name" groupName="Info" type="string"/>
+    <data name="Number" displayName="Number" groupName="Info" type="int" default="0" minValue="0" maxValue="5000"/>
+  </class>
+  
+  <!--
+  /**
+   * Boost
+   * A boost should speed up an entity that passes over it in the direction it is currently heading. 
+   */
+  -->
+  <class name="Boost" super="GameEntity" usage="object">
+    <data name="Boost" displayName="Boost" groupName="Info" default="0.0" minValue="-5000" maxValue="5000" type="float"/>
+    <data name="Gain" displayName="Gain" groupName="Info" default="0.0" minValue="-5000" maxValue="5000" type="float"/>  
+  </class>
+
+  <!-- 
+   /**
+    * Portal 
+    * A portal is a teleportation mechanism that ports objects from begin to end
+    */
+  -->
+  <class name="Portal" super="GameEntity" usage="object">
+    <data name="Name" displayName="Name" groupName="Info" type="String"/>
+    <data name="Start" displayName="Start" groupName="Info" type="float3"/>
+    <data name="End" displayName="End" groupName="Info" type="float3"/>
+    <data name="Time" displayName="Time before teleport is performed" groupName="Info" type="float" default="0.0" minValue="0.0"/>
+  </class>
+
+  <!-- 
+   /**
+    * Powerup spawn
+    * A spawnpoint for powerups
+    */
+  -->
+  <class name="PowerupSpawn" super="OgreEntity" usage="object">
+  </class>
+
+  <!-- 
+   /**
+    * Reset spawn 
+    * A spawnpoint for resets
+    */
+  -->
+  <class name="ResetSpawn" usage="object">
+	<data name="Checkpoint" displayName="Checkpoint" groupName="Info" type="int" default="0" minValue="0" maxValue="5000"/>
+  </class>
+
+  <!-- 
+  /**
+   * StaticBody 
+   * A static body that can be hit.
+   */ 
+  -->
+  <class name="StaticBody" super="GameEntity" usage="object">
+  </class>
+
+</userDataTypes>

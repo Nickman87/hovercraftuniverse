@@ -1,0 +1,1 @@
+Alle output (.lib) van biblitheken waar tegen gelinkt moet worden in het hoofdproject

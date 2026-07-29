@@ -1,0 +1,237 @@
+
+material SoccerBall
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture soccer.png
+			}
+		}
+
+	}
+
+}
+
+
+
+material DarkHall
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture darktexture.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material Gray
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+		}
+
+	}
+
+}
+
+
+
+material Red
+{
+	technique
+	{
+		pass
+		{
+			ambient 1 0 0 1
+			diffuse 1 0 0 1
+			specular 0 0 0 10 0
+		}
+
+	}
+
+}
+
+
+
+material Blue
+{
+	technique
+	{
+		pass
+		{
+			ambient 0 0.188235 1 1
+			diffuse 0 0.188235 1 1
+			specular 0 0 0 10 0
+		}
+
+	}
+
+}
+
+
+
+material DarkHall
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture darktexture.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material WallTexture
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture walltexture.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material Gray
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+		}
+
+	}
+
+}
+
+
+
+material Goal
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture goalfence.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material 09-Default
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture grass.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material SoccerField
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.588235 0.588235 0.588235 1
+			diffuse 0.588235 0.588235 0.588235 1
+			specular 0 0 0 10 0
+
+			texture_unit
+			{
+				texture soccerfield.jpg
+			}
+		}
+
+	}
+
+}
+
+
+
+material Post
+{
+	technique
+	{
+		pass
+		{
+			specular 0 0 0 10 0
+		}
+
+	}
+
+}
+
+

@@ -1,0 +1,50 @@
+<scene formatVersion="1.0" upAxis="y" unitsPerMeter="39.3701" minOgreVersion="1.7" ogreMaxVersion="2.2.5" author="OgreMax Scene Exporter (www.ogremax.com)" application="3DS Max">
+    <environment>
+        <colourAmbient r="0.333333" g="0.333333" b="0.333333" />
+        <colourBackground r="0" g="0" b="0" />
+        <clipping near="0" far="100000" />
+    </environment>
+    <nodes>
+        <node name="OgreMaxSceneSettings01">
+            <position x="0" y="0" z="0" />
+            <scale x="1" y="1" z="1" />
+            <rotation qx="0.707107" qy="0" qz="0" qw="0.707107" />
+        </node>
+        <node name="hover1">
+            <position x="4.43386e-006" y="0" z="0" />
+            <scale x="1" y="1" z="0.999997" />
+            <rotation qx="-7.15256e-007" qy="6.61545e-009" qz="-3.72566e-009" qw="1" />
+            <entity name="hover1" castShadows="true" receiveShadows="true" meshFile="hover1.mesh">
+                <userData>
+                    <![CDATA[<Hovercraft><Name>hover1</Name><Description>Nonw</Description><OgreEntity>hover1</OgreEntity><ProcessInterval>0.016</ProcessInterval><Speed>100</Speed><Mass>50</Mass><Acceleration>10</Acceleration><Steering>100</Steering></Hovercraft>]]>
+</userData>
+                <subentities>
+                    <subentity index="0" materialName="HoverBodyMap" />
+                    <subentity index="1" materialName="WindScreen" />
+                    <subentity index="2" materialName="HovercogsCabin" />
+                    <subentity index="3" materialName="CogsMetallic" />
+                    <subentity index="4" materialName="HoverTireMap" />
+                    <subentity index="5" materialName="Seat" />
+                    <subentity index="6" materialName="SteeringWheel" />
+                </subentities>
+            </entity>
+        </node>
+    </nodes>
+    <externals>
+        <item name="Front">
+            <position x="8.6402e-010" y="1.01424" z="-2.21346" />
+            <rotation qx="-4.17313e-014" qy="6.61545e-009" qz="-3.72567e-009" qw="1" />
+            <scale x="0.0483475" y="0.0374989" z="0.0504044" />
+        </item>
+        <item name="Exhauster">
+            <position x="-4.54747e-013" y="1.94636" z="1.92267" />
+            <rotation qx="-4.17313e-014" qy="6.61545e-009" qz="-3.72567e-009" qw="1" />
+            <scale x="0.0483475" y="0.0374989" z="0.0504044" />
+        </item>
+        <item name="Seat">
+            <position x="0" y="1.46035" z="-0.199957" />
+            <rotation qx="-4.17313e-014" qy="6.61545e-009" qz="-3.72567e-009" qw="1" />
+            <scale x="0.0483475" y="0.0374989" z="0.0504044" />
+        </item>
+    </externals>
+</scene>

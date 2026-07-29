@@ -1,0 +1,10 @@
+ <userDataTypes>
+  <!-- Type of an asteroid -->
+  <enum name="AsteroidType" type="int">
+    <enumItem name="Ice" value="0" />
+    <enumItem name="Fire" value="1" />
+    <enumItem name="Jungle" value="2" />
+    <enumItem name="Stone" value="3" />
+    <enumItem name="Desert" value="4" />
+  </enum>
+</userDataTypes>

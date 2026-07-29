@@ -1,0 +1,24 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Visual Studio / C++ build junk
+*.obj
+*.pdb
+*.ncb
+*.suo
+*.user
+*.aps
+*.sdf
+*.opensdf
+ipch/
+*.log
+
+# NOTE: not ignoring Debug/Release dirs by name — bin/debug and bin/release
+# here hold checked-in installer assets (.ini/.bat), not compiler output.
+
+# Eclipse CDT
+.metadata/
+
+# Jekyll build output
+docs/_site/
