@@ -4,6 +4,7 @@ A multiplayer 3D hovercraft racing game set in space, where players race between
 
 Hovercraft Universe was developed in 2009–2010 by a student team at Hasselt University (Belgium) — Dirk Delahaye, Kristof Overdulve, Nick De Frangh, Olivier Berghmans, Pieter-Jan Pintens and Tobias Van Bladel — as project `uhasseltaacgua` on Google Code (SVN), for the course *Architectuur en Algoritmes van Computer Games*. This repository is a migration of that SVN trunk to GitHub. The game reached a working **v1.0** with an installer in June 2010 ([trailer](https://www.youtube.com/watch?v=rhufn_-8xO8)); development stopped after that. The original project was published under **GPL v3**.
 
+- **▶ Want to just play it?** See [RUNNING.md](RUNNING.md) — the unmodified 2010 v1.0 binaries run on Windows 11 (verified July 2026), including the Flash GUI.
 - **Wiki / documentation:** https://nickman87.github.io/hovercraftuniverse/ (migrated wiki, mostly Dutch — source in [`docs/wiki/`](docs/wiki/))
 - **Original project (archived):** https://code.google.com/archive/p/uhasseltaacgua/
 - **Development screenshots:** [`dev-screens/`](dev-screens/) (March–June 2010)
