@@ -22,3 +22,7 @@ ipch/
 
 # Jekyll build output
 docs/_site/
+
+# Local mirror of the Google Code Archive packages (see README, Phase 0) —
+# ~1.2 GB of installers/SDKs, to be published as a GitHub Release, not committed.
+archive-mirror/
