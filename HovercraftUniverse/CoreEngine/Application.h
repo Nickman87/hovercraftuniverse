@@ -88,7 +88,22 @@ protected:
 	std::string mEntitiesPath;
 	/** The path to the entities file */
 	std::string mEntitiesFile;
-	
+
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): go()
+	// used to receive host/port and silently discard them (see the
+	// commented-out body of createClient() below). A two-process test
+	// harness needs a way to auto-connect a client to an already-running
+	// dedicated server with no GUI interaction, so go() now stashes its
+	// arguments here; MainMenuState reads them back on its first
+	// frameStarted() tick to (optionally) drive the real onConnect() path
+	// itself. Static, like mConfig above, since Application has no
+	// singleton accessor but game states outside this class need to read
+	// them. Not original behaviour -- with no --autoconnect flag,
+	// msAutoConnect stays false and nothing changes.
+	static Ogre::String msAutoConnectHost;
+	static unsigned int msAutoConnectPort;
+	static bool msAutoConnect;
+
 public:
 
 	/**
@@ -123,8 +138,21 @@ public:
 	 *
 	 * @param host the hostname to connect to
 	 * @param port the port to connect on
+	 * @param autoConnect test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	 *        when true, the menu state connects to host:port itself on its
+	 *        first tick instead of waiting for a GUI click. Defaults to
+	 *        false, i.e. unchanged original behaviour.
 	 */
-	void go(const Ogre::String& host, unsigned int port);
+	void go(const Ogre::String& host, unsigned int port, bool autoConnect = false);
+
+	/**
+	 * Test affordance (revival Phase B, docs/porting/phase-b-plan.md): read
+	 * back the host/port/autoConnect that were passed to go(), so a game
+	 * state can drive an auto-connect without any GUI interaction.
+	 */
+	static const Ogre::String& getAutoConnectHost() { return msAutoConnectHost; }
+	static unsigned int getAutoConnectPort() { return msAutoConnectPort; }
+	static bool getAutoConnect() { return msAutoConnect; }
 
 	/**
 	 * Creates the client.

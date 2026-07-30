@@ -6,9 +6,12 @@
 #include <boost/thread/thread_time.hpp>
 #include <HovSound.h>
 #include <NMessageBox.h>
+// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): needed
+// for Application::getAutoConnect()/getAutoConnectHost()/getAutoConnectPort().
+#include "Application.h"
 
 namespace HovUni {
-	MainMenuState::MainMenuState() : mMenu(0), mContinue(true), mLastGUIUpdate(-1), mConnectionThread(0), mConnectionFinished(false) {
+	MainMenuState::MainMenuState() : mMenu(0), mContinue(true), mLastGUIUpdate(-1), mConnectionThread(0), mConnectionFinished(false), mAutoConnectTriggered(false) {
 	}
 
 	MainMenuState::~MainMenuState() {
@@ -129,6 +132,36 @@ namespace HovUni {
 	}
 
 	bool MainMenuState::frameStarted(const Ogre::FrameEvent & evt) {
+		// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): a
+		// --autoconnect command-line flag lets a two-process test harness
+		// skip the Flash main menu entirely, so tests don't have to click
+		// through GUI buttons to reach a race. This has to be triggered from
+		// here (the first frameStarted() tick) rather than the constructor,
+		// because onConnect() below needs mMenu and the state manager to be
+		// fully built -- exactly the same reason the connection-result poll
+		// just below already lives in frameStarted() rather than a callback.
+		// Without --autoconnect, Application::getAutoConnect() is false and
+		// this whole block is a no-op: behaviour is unchanged from before
+		// this affordance existed.
+		if (!mAutoConnectTriggered) {
+			mAutoConnectTriggered = true;
+
+			if (Application::getAutoConnect()) {
+				const Ogre::String& host = Application::getAutoConnectHost();
+				unsigned int port = Application::getAutoConnectPort();
+
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[Autoconnect]: connecting to " << host << ":" << port;
+
+				// Reuse the exact same onConnect()/mMenu pairing that the
+				// "Join game" button uses (see ServerMenu::onOk and
+				// MainMenu::onSingleplayer) so this harness exercises the
+				// real production connect path end-to-end, instead of
+				// reimplementing it.
+				onConnect(host, mMenu);
+			}
+		}
+
 		//Check if we have a connection result
 		if (mConnectionFinished) {
 			mConnectListener->onConnectFinish(mConnectionResult);

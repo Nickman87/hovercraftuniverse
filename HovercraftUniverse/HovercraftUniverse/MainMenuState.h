@@ -41,6 +41,11 @@ namespace HovUni {
 			/** The local server, for single player (Dirk)*/
 			HUDedicatedServer* mLocalServer;
 
+			/** Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+			 * whether the --autoconnect check in frameStarted() has already
+			 * run once. Not original behaviour. */
+			bool mAutoConnectTriggered;
+
 		public:
 			/**
 			 * Constructor for the Main menu state

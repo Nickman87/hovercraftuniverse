@@ -30,6 +30,11 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 	bool server = false;
 	unsigned int port = 2375;
 	Ogre::String host = "localhost";
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autoconnect lets a two-process test harness connect a client to an
+	// already-running dedicated server with no GUI interaction. Without this
+	// flag on the command line, behaviour is unchanged.
+	bool autoConnect = false;
 	//parse all commandline parameters (seperated by spaces)
 	Ogre::String commandline (strCmdLine);
 	// Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): the
@@ -51,6 +56,8 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 			}
 		} else if ((*i) == "--console") {
 			console = true;
+		} else if ((*i) == "--autoconnect") {
+			autoConnect = true;
 		}
 	}
 
@@ -80,7 +87,7 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 		
 		try {
 			app.init();
-			app.go(host,port);
+			app.go(host,port,autoConnect);
 		} catch (Ogre::Exception & e) {
 			MessageBox(NULL, e.getFullDescription().c_str(), "An exception has occurred!", MB_OK | MB_ICONERROR | MB_TASKMODAL);
 		} catch (HovUni::Exception e2) {

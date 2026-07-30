@@ -15,6 +15,12 @@ namespace HovUni {
 Ogre::SceneManager* Application::msSceneMgr = 0;
 Config* Application::mConfig = 0;
 
+// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): see the
+// member declarations in Application.h.
+Ogre::String Application::msAutoConnectHost = "";
+unsigned int Application::msAutoConnectPort = 0;
+bool Application::msAutoConnect = false;
+
 Application::Application(Ogre::String appName, Ogre::String configINI) : mAppName(appName), mConfigINI(configINI) {
 	// All was initialized
 }
@@ -42,7 +48,17 @@ void Application::init() {
 	setupInputSystem();
 }
 
-void Application::go(const Ogre::String& host, unsigned int port) {
+void Application::go(const Ogre::String& host, unsigned int port, bool autoConnect) {
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): stash
+	// the --autoconnect target so MainMenuState can trigger the production
+	// onConnect() path itself once the menu state is ticking, without any
+	// GUI interaction. host/port used to be silently discarded here (see
+	// the commented-out body of createClient() below) -- this is the first
+	// thing that actually reads them.
+	msAutoConnectHost = host;
+	msAutoConnectPort = port;
+	msAutoConnect = autoConnect;
+
 	setupScene();
 	createClient(host,port);
 	createFrameListener();
