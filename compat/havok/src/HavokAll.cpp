@@ -155,11 +155,62 @@ void hkpWorld::_dispatchCollisionEvents() {
         btPersistentManifold* manifold = m_dispatcher->getManifoldByIndexInternal(i);
         if (manifold->getNumContacts() == 0) continue;
 
-        auto* bodyA = static_cast<const btRigidBody*>(manifold->getBody0());
-        auto* bodyB = static_cast<const btRigidBody*>(manifold->getBody1());
-        auto* entA = bodyA ? static_cast<hkpEntity*>(bodyA->getUserPointer()) : nullptr;
-        auto* entB = bodyB ? static_cast<hkpEntity*>(bodyB->getUserPointer()) : nullptr;
-        if (!entA && !entB) continue;
+        // Bullet's dispatcher builds a manifold for ANY overlapping pair the
+        // broadphase reports, including a btPairCachingGhostObject (the
+        // Bullet object backing every hkpPhantom -- see hkpWorld::addPhantom)
+        // overlapping a rigid body: CF_NO_CONTACT_RESPONSE only tells the
+        // constraint solver to ignore the contact, it does not stop manifold
+        // creation. A blind static_cast<const btRigidBody*> here would accept
+        // that ghost object's btCollisionObject* and then reinterpret its
+        // setUserPointer(phantom) (an hkpPhantom*, sibling of hkpEntity under
+        // hkpWorldObject, NOT the same layout) as an hkpEntity* -- silently
+        // reading entA->m_collisionListeners out of whatever bytes happen to
+        // sit at that offset in the real hkpPhantom object. That is exactly
+        // the access violation this function is known to crash with (see
+        // docs/porting/phase-b-collision.md's dispatch-crash note): the
+        // "vector" decoded from misaligned hkpPhantom fields looks non-empty
+        // but its data pointer is garbage.
+        //
+        // btRigidBody::upcast() is Bullet's own type-checked cast (it tests
+        // btCollisionObject::getInternalType() before casting) and returns
+        // null for a ghost object -- exactly the same guard
+        // _updatePhantomOverlaps() and hkGetRigidBody() already use elsewhere
+        // in this file. Phantom overlap notifications are delivered
+        // separately and correctly via _updatePhantomOverlaps() /
+        // hkpPhantom::addOverlappingCollidable(); nothing is lost by
+        // excluding ghost objects here.
+        //
+        // Require BOTH sides to be real rigid bodies, not just "at least
+        // one" -- real Havok's hkpContactProcessEvent is only ever raised
+        // for a genuine rigid-body/rigid-body manifold, so m_collidableA and
+        // m_collidableB are always valid there. Listener code written
+        // against that contract (e.g. HovercraftCollisionListener::
+        // contactProcessCallback in HavokHovercraftCollisionEffect.cpp,
+        // which picks "the other side" and unconditionally calls
+        // other->getOwner()) rightly never null-checks the non-self side.
+        // Dispatching a one-sided event (one real entity, one null because
+        // the other body was a ghost) would hand that code a null
+        // hkpCollidable* and crash it -- a second, more subtle version of
+        // the same phantom/rigid-body type confusion this function used to
+        // have, just moved one call deeper. So a manifold with either side
+        // not a rigid body is skipped entirely, exactly as real Havok would
+        // never have produced it in the first place.
+        auto* bodyA = btRigidBody::upcast(manifold->getBody0());
+        auto* bodyB = btRigidBody::upcast(manifold->getBody1());
+        if (!bodyA || !bodyB) {
+            // Only true the first time a phantom/ghost object actually
+            // shows up in a contact manifold -- make the (correct, by
+            // design) drop visible rather than a silent no-op, per the
+            // "don't mask a real gap invisibly" rule.
+            havok_compat::todoPhaseBOnce("hkpWorld::_dispatchCollisionEvents:ghost",
+                "skipping a contact manifold involving a non-rigid-body (phantom/ghost) "
+                "collision object -- phantom overlaps are reported via "
+                "hkpWorld::_updatePhantomOverlaps()/hkpPhantom::addOverlappingCollidable() instead");
+            continue;
+        }
+        auto* entA = static_cast<hkpEntity*>(bodyA->getUserPointer());
+        auto* entB = static_cast<hkpEntity*>(bodyB->getUserPointer());
+        if (!entA && !entB) continue; // shouldn't happen -- attachBullet() always sets both
 
         hkpProcessCollisionData data;
         for (int c = 0; c < manifold->getNumContacts(); ++c) {
