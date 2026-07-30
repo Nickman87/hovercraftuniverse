@@ -7,6 +7,10 @@ find_package(Bullet CONFIG REQUIRED)
 add_library(hu_havok_compat STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/HavokAll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/havok_compat/HavokAll.h
+    # Phase B collision-reconstruction provider hook -- see
+    # docs/porting/phase-b-collision.md section 3.1. Ogre-free by design;
+    # implemented by the new hu_collision module (modern/CMakeLists.txt).
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/havok_compat/CollisionProvider.h
 )
 
 target_include_directories(hu_havok_compat PUBLIC

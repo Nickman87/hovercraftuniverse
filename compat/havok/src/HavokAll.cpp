@@ -2,6 +2,7 @@
 // See compat/havok/include/havok_compat/HavokAll.h for the class bodies and
 // docs/porting/havok-compat.md for the design rationale.
 #include "havok_compat/HavokAll.h"
+#include "havok_compat/CollisionProvider.h"
 
 #include <set>
 #include <unordered_set>
@@ -20,6 +21,21 @@ void todoPhaseBOnce(const char* site, const std::string& msg) {
     if (seen.count(key)) return;
     seen.insert(key);
     std::cerr << "[hu_havok_compat] TODO(phaseB): " << msg << std::endl;
+}
+
+// Non-owning registration point for the Phase B collision reconstruction
+// provider -- see CollisionProvider.h. Deliberately a plain static pointer,
+// not a singleton with lazy construction: exactly one real implementation
+// (hu_collision's OgreCollisionProvider) is ever registered, once, from
+// HUDedicatedServer::run() at process startup.
+static CollisionProvider* g_collisionProvider = nullptr;
+
+void setCollisionProvider(CollisionProvider* provider) {
+    g_collisionProvider = provider;
+}
+
+CollisionProvider* collisionProvider() {
+    return g_collisionProvider;
 }
 
 } // namespace havok_compat
@@ -186,7 +202,19 @@ void hkpWorld::stepMultithreaded(hkJobQueue*, hkJobThreadPool*, hkReal deltaTime
 // ---------------------------------------------------------------------------
 
 hkpWorld* hkpPhysicsData::createWorld() {
-    return new hkpWorld(m_cinfo);
+    hkpWorld* world = new hkpWorld(m_cinfo);
+    // Phase B: add every reconstructed named body (see hkpHavokSnapshot::load()
+    // in HavokAll.h) to the freshly-created world, mirroring what real
+    // Havok's snapshot loader would have done for bodies deserialized out of
+    // the .hkx -- see docs/porting/phase-b-collision.md section 3.1. A no-op
+    // when m_namedBodies is empty (no CollisionProvider registered, or this
+    // hkpPhysicsData belongs to a hovercraft hull snapshot -- HavokHovercraft
+    // ::load() never calls createWorld() on its own hkpPhysicsData, it only
+    // ever reuses the body's *shape*).
+    for (auto& kv : m_namedBodies) {
+        if (kv.second) world->addEntity(kv.second);
+    }
+    return world;
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,8 @@
 #include <BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
 #include <BulletCollision/CollisionShapes/btTriangleMesh.h>
 
+#include "havok_compat/CollisionProvider.h"
+
 namespace havok_compat {
     // Logs `msg` (prefixed "TODO(phaseB): ") to stderr exactly once per
     // distinct call site, keyed by `site` (pass __FUNCTION__ or a literal).
@@ -992,7 +994,25 @@ struct hkpWorldCinfo {
 class hkpPhysicsData : public hkReferencedObject {
 public:
     hkpWorldCinfo m_cinfo;
-    std::unordered_map<std::string, hkpRigidBody*> m_namedBodies; // always empty until Phase B's .hkx/scene-mesh loader populates it
+    // Populated either by Phase B's CollisionProvider (see below), or left
+    // empty exactly as Phase A if no provider is registered -- see
+    // hkpHavokSnapshot::load().
+    std::unordered_map<std::string, hkpRigidBody*> m_namedBodies;
+
+    // Releases this object's ownership share of every named body (see
+    // hkpHavokSnapshot::load(): each is constructed with the implicit
+    // hkReferencedObject refcount of 1, held by this map). Bodies also
+    // added to a world by createWorld() picked up their own extra reference
+    // there via hkpWorld::addEntity(), so this does not free those -- it
+    // only frees bodies nobody else ever referenced (e.g. a hovercraft
+    // hull snapshot's body, whose *shape* gets addReference()'d and reused
+    // by HavokHovercraft::load() but whose body itself is never added to
+    // any hkpWorld).
+    ~hkpPhysicsData() override {
+        for (auto& kv : m_namedBodies) {
+            if (kv.second) kv.second->removeReference();
+        }
+    }
 
     void setWorldCinfo(const hkpWorldCinfo* cinfo) { m_cinfo = *cinfo; }
     hkpWorld* createWorld();
@@ -1001,7 +1021,7 @@ public:
         if (it == m_namedBodies.end()) {
             havok_compat::todoPhaseBOnce("hkpPhysicsData::findRigidBodyByName",
                 std::string("no rigid body named '") + (name ? name : "") +
-                "' -- .hkx collision data is not loaded in Phase A (see docs/porting/havok-compat.md)");
+                "' -- .hkx collision data is not loaded (no CollisionProvider registered, or the name does not appear in the matching .scene; see docs/porting/phase-b-collision.md)");
             return nullptr;
         }
         return it->second;
@@ -1009,13 +1029,64 @@ public:
 };
 
 namespace hkpHavokSnapshot {
+    // Wraps a provider-owned btCollisionShape in an hkpShape and constructs
+    // a mass-0 ("fixed") hkpRigidBody at the given world transform, exactly
+    // like a body real Havok's snapshot loader would have deserialized out
+    // of the .hkx. Named helper (not a lambda) so it's visible from the
+    // single call site below and easy to find when reading this file.
+    inline hkpRigidBody* buildNamedBody(const havok_compat::ReconstructedBody& rb) {
+        hkpShape* shapeWrapper = new hkpShape();
+        shapeWrapper->m_bulletShape = rb.shape;
+        shapeWrapper->m_type = rb.isStatic ? HK_SHAPE_MESH : HK_SHAPE_CONVEX_VERTICES;
+
+        btVector3 localInertia(0, 0, 0); // mass 0 => static, no inertia to compute
+        auto* motionState = new btDefaultMotionState(rb.worldTransform);
+        btRigidBody::btRigidBodyConstructionInfo rbInfo(0.0f, motionState, rb.shape, localInertia);
+        auto* bulletBody = new btRigidBody(rbInfo);
+
+        hkpRigidBody* body = new hkpRigidBody();
+        body->attachBullet(bulletBody, shapeWrapper);
+        body->m_motionType = hkpMotion::MOTION_FIXED;
+        body->m_name = rb.name;
+        return body;
+    }
+
     inline hkpPhysicsData* load(hkStreamReader* reader, hkPackfileReader::AllocatedData** loadedData) {
-        havok_compat::todoPhaseBOnce("hkpHavokSnapshot::load",
-            std::string(".hkx snapshot loading is not implemented (path: ") +
-            (reader ? reader->path : "?") +
-            "). Returning an empty hkpPhysicsData; see docs/porting/havok-compat.md for the Phase B plan (rebuild collision from OgreMax scene/mesh geometry instead of parsing the binary .hkx format).");
         *loadedData = new hkPackfileReader::AllocatedData();
-        return new hkpPhysicsData();
+        hkpPhysicsData* data = new hkpPhysicsData();
+
+        havok_compat::CollisionProvider* provider = havok_compat::collisionProvider();
+        std::string path = reader ? reader->path : "";
+        // Unconditional (not todoPhaseBOnce-deduplicated) entry trace: this
+        // whole function runs on HavokThread.cpp's dedicated physics thread,
+        // where an uncaught exception is reported via a modal MessageBox
+        // nobody in an automated test run can click, permanently deadlocking
+        // the process with no other log output -- see
+        // docs/porting/phase-b-collision.md's verification section. This
+        // line existing at all is the difference between "silent deadlock"
+        // and "we know exactly which .hkx it was loading when it happened".
+        std::cerr << "[hu_havok_compat] hkpHavokSnapshot::load(" << path << ") provider="
+                  << (provider ? "registered" : "none") << std::endl;
+        if (provider) {
+            std::vector<havok_compat::ReconstructedBody> bodies;
+            if (provider->build(path, bodies)) {
+                for (auto& rb : bodies) {
+                    data->m_namedBodies[rb.name] = buildNamedBody(rb);
+                }
+                return data;
+            }
+            havok_compat::todoPhaseBOnce(("hkpHavokSnapshot::load:" + path).c_str(),
+                std::string("CollisionProvider::build() failed for '") + path +
+                "' -- returning an empty hkpPhysicsData; see docs/porting/phase-b-collision.md");
+            return data;
+        }
+
+        havok_compat::todoPhaseBOnce("hkpHavokSnapshot::load",
+            std::string(".hkx snapshot loading is not implemented (path: ") + path +
+            "). Returning an empty hkpPhysicsData; see docs/porting/havok-compat.md and "
+            "docs/porting/phase-b-collision.md -- no CollisionProvider is registered "
+            "(hu_collision not linked in, or setCollisionProvider() never called).");
+        return data;
     }
 }
 

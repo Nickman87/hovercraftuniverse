@@ -865,6 +865,15 @@ target_link_libraries(hu_scripting PUBLIC
 # (vcpkg). See docs/porting/havok-compat.md.
 add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/havok ${CMAKE_BINARY_DIR}/compat_havok)
 
+# --- hu_collision ----------------------------------------------------------
+# Phase B collision geometry reconstruction (compat/collision/**, owned by
+# this porting effort). Implements hu_havok_compat's CollisionProvider hook
+# by rebuilding Bullet shapes from .scene + .mesh render data, since the
+# original Havok .hkx packfiles are unparseable. Needs Ogre + hu_ogremax's
+# vendored TinyXML + hu_havok_compat's shape/provider types, which is why it
+# is added after both. See docs/porting/phase-b-collision.md.
+add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/collision ${CMAKE_BINARY_DIR}/compat_collision)
+
 # --- hu_skyx_compat --------------------------------------------------------
 # API-compatible, from-scratch replacement for SkyX 0.1 (sky/cloud/star
 # rendering, LGPL). Real SkyX 0.1 source could not be recovered (only VC9
@@ -1194,6 +1203,7 @@ find_package(Boost QUIET COMPONENTS interprocess) # header-only; component mainl
 
 target_link_libraries(hu_game_physics PUBLIC
     hu_havok_compat
+    hu_collision
     hu_skyx_compat
     hu_coreengine
     hu_networking
