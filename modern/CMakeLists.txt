@@ -1246,6 +1246,13 @@ add_executable(HovercraftUniverse WIN32
     ${HU_GAMEPHYSICS_ROOT}/main.cpp
 )
 
+# Emit a linker map alongside the exe. No debuggers (cdb/windbg) are installed
+# on the dev machine, so when Windows reports a crash as a bare "faulting
+# offset" RVA in the Application event log, the map is the only way to turn
+# that number into a function name without installing tooling. Cheap, and it
+# has already been needed once.
+target_link_options(HovercraftUniverse PRIVATE /MAP)
+
 target_compile_definitions(HovercraftUniverse PRIVATE
     WIN32
     _WINDOWS
