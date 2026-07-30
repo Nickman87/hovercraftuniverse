@@ -21,11 +21,22 @@
 * (raised on connection loss / NODE_REMOVE, mandatory on the proxy/owner
 * side per the same doc's §9).
 *
-* Still TODO(phaseB) stubs: data replication (addReplicationInt/Float/Bool/
-* String/StringW, addInterpolationInt/Float, addReplicator -- recorded but
-* never synced; that's step 3, deliberately out of scope for this pass),
-* Zoidlevel membership (applyForZoidLevel/registerNodeByTag), mustsync/
-* Zoidlevel authority migration, file transfer.
+* Real (Phase B, steps 3-4 -- see docs/porting/phase-b-replication.md and
+* docs/porting/zoidcom-original-semantics.md): data replication is now
+* actually driven. addReplicationInt/Bool/Float/String/StringW and
+* addReplicator()-registered ZCom_ReplicatorBasic/ZCom_ReplicatorAdvanced
+* instances are all polled/dispatched for real by
+* ZCom_shimTickReplication(), called once per node from
+* ZCom_Control::ZCom_processReplicators(); incoming data is applied by
+* ZCom_shimApplyReplBatch()/ZCom_shimDeliverReplAdvanced(), called from
+* ZCom_processInput(). See Node.cpp's file header for the full design,
+* including where it deliberately diverges from the real library's
+* documented timing (Advanced replicators' sendData()/sendDataDirect() are
+* delivered immediately rather than deferred to onPreSendData()).
+*
+* Still TODO(phaseB) stubs: addInterpolationInt/Float (unused by any current
+* call site), Zoidlevel membership (applyForZoidLevel/registerNodeByTag),
+* mustsync/Zoidlevel authority migration, file transfer.
 *
 * This header also declares a handful of `ZCom_shim*` methods that are NOT
 * part of the real ZoidCom API -- they exist purely so
@@ -217,6 +228,39 @@ public:
   /// considers _conn to have, defaulting to Proxy if _conn isn't linked.
   /// Used to fill in remote_role when delivering an incoming NODE_EVENT.
   eZCom_NodeRole ZCom_shimRemoteRoleFor(ZCom_ConnID _conn) const;
+
+  /* ---------------------------------------------------------------------
+   * Phase B steps 3-4 shim-internal hooks (the replication tick). NOT part
+   * of the real ZoidCom API. See docs/porting/phase-b-replication.md and
+   * compat/zoidcom/src/Node.cpp's file header.
+   * ------------------------------------------------------------------ */
+
+  /// Called once per node, once per ZCom_Control::ZCom_processReplicators()
+  /// call: drives Process() on every CALLPROCESS-flagged
+  /// ZCom_ReplicatorAdvanced item, then computes this tick's dirty set
+  /// across every primitive (addReplicationInt/Bool/Float/String/StringW)
+  /// and ZCom_ReplicatorBasic item and fans it out to every relevant
+  /// connection per the item's replication rule/flags.
+  void ZCom_shimTickReplication(zU32 _simulation_time_passed);
+
+  /// Applies an incoming primitive/ZCom_ReplicatorBasic batch (a
+  /// kMsgNodeReplBatch payload, already unwrapped down to the item list) to
+  /// this node's registered fields/replicators.
+  void ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, zU32 _estimated_time_sent);
+
+  /// Backs ZCom_ReplicatorAdvanced::sendData()/sendDataDirect() (see
+  /// Replicator.cpp): finds _rep's item index on this node and sends
+  /// _stream to either _direct_dest alone, or (if _direct_dest is
+  /// ZCom_Invalid_ID) every connection the setup's replication rule
+  /// permits. Always takes ownership of (and eventually deletes) _stream.
+  void ZCom_shimSendAdvancedData(ZCom_Replicator* _rep, eZCom_SendMode _mode, ZCom_BitStream* _stream,
+    zU32 _reference_id, ZCom_ConnID _direct_dest);
+
+  /// Delivers an incoming kMsgReplAdvanced payload to the
+  /// ZCom_ReplicatorAdvanced at _item_index via onDataReceived(). Always
+  /// deletes _payload.
+  void ZCom_shimDeliverReplAdvanced(zU16 _item_index, ZCom_ConnID _from_conn, eZCom_NodeRole _remote_role,
+    ZCom_BitStream* _payload, zU32 _estimated_time_sent);
 };
 
 #endif

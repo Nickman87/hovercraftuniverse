@@ -4,11 +4,13 @@
 *
 * ZCom_ReplicatorSetup and the ZCom_Replicator base bookkeeping (flags,
 * setup pointer, peek buffer plumbing) are implemented for real -- they're
-* just plain data holders. What is NOT implemented is Zoidcom actually
-* *calling* checkState()/packData()/unpackData()/Process() as part of a
-* live replication tick: see ZCom_Node::addReplicator() and
-* ZCom_Control::ZCom_processReplicators() in the .cpp for the
-* TODO(phaseB) markers.
+* just plain data holders.
+*
+* Real (Phase B, steps 3-4): checkState()/packData()/unpackData()/Process()
+* are now actually driven as part of a live replication tick -- see
+* ZCom_Node::ZCom_shimTickReplication() in Node.cpp and
+* ZCom_Control::ZCom_processReplicators() in Control.cpp, plus
+* docs/porting/phase-b-replication.md.
 *****************************************/
 
 #ifndef _ZOIDREPLICATOR_H_

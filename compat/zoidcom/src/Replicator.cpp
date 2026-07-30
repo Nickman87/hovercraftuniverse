@@ -5,12 +5,22 @@
 // plumbing (peekDataStore/peekDataRetrieve/getPeekStream), operator new/
 // delete honoring ZoidCom::overrideMemoryHandlers().
 //
-// TODO(phaseB): nothing currently *drives* checkState()/packData()/
-// unpackData()/Process() on a live replication tick (see
-// ZCom_Node::addReplicator() in Node.cpp and
-// ZCom_Control::ZCom_processReplicators() in Control.cpp), and
-// ZCom_ReplicatorAdvanced::sendData()/sendDataDirect() have no node-level
-// routing to deliver to yet, so they log-and-drop.
+// Real (Phase B, steps 3-4 -- see docs/porting/phase-b-replication.md):
+// checkState()/packData()/unpackData() (ZCom_ReplicatorBasic) and Process()
+// (both) are now actually driven by ZCom_Node::ZCom_shimTickReplication(),
+// called once per node from ZCom_Control::ZCom_processReplicators() --
+// see Node.cpp's file header for the full design.
+// ZCom_ReplicatorAdvanced::sendData()/sendDataDirect() below now route
+// through ZCom_Node::ZCom_shimSendAdvancedData(), which resolves the
+// destination connection(s) from this replicator's node and setup rules
+// and hands off to ZCom_Control's wire send. onDataReceived() is called
+// for real from ZCom_Node::ZCom_shimDeliverReplAdvanced().
+//
+// TODO(phaseB): getLastUpdateTime() stays a stub -- the one concrete
+// ZCom_ReplicatorAdvanced in this codebase (EntityPropertyMapReplicator)
+// never calls it (mindelay/maxdelay are explicitly not enforced for
+// Advanced replicators per zoidcom-original-semantics.md §5, so it has no
+// self-timing need).
 #include "zoidcom_shim_internal.h"
 
 // --- ZCom_ReplicatorSetup -------------------------------------------------
@@ -109,15 +119,23 @@ zU32* ZCom_ReplicatorAdvanced::getLastUpdateTime(ZCom_ConnID _cid) {
 }
 
 void ZCom_ReplicatorAdvanced::sendData(eZCom_SendMode _mode, ZCom_BitStream* _stream, zU32 _reference_id) {
-    (void) _mode; (void) _reference_id;
-    zshim::todoPhaseBOnce("ZCom_ReplicatorAdvanced::sendData",
-        "advanced-replicator event routing to peer replicators is not implemented; data is dropped");
-    delete _stream; // matches real contract: ownership is taken and eventually freed
+    if (!m_node) {
+        zshim::todoPhaseBOnce("ZCom_ReplicatorAdvanced::sendData(no-node)",
+            "sendData() called before this replicator was attached to a node (addReplicator() calls setNode())");
+        delete _stream;
+        return;
+    }
+    // ZCom_Invalid_ID as the destination means "broadcast per the setup's
+    // replication rule direction" -- see ZCom_Node::ZCom_shimSendAdvancedData().
+    m_node->ZCom_shimSendAdvancedData(this, _mode, _stream, _reference_id, ZCom_Invalid_ID);
 }
 
 void ZCom_ReplicatorAdvanced::sendDataDirect(eZCom_SendMode _mode, ZCom_ConnID _dest, ZCom_BitStream* _stream, zU32 _reference_id) {
-    (void) _mode; (void) _dest; (void) _reference_id;
-    zshim::todoPhaseBOnce("ZCom_ReplicatorAdvanced::sendDataDirect",
-        "advanced-replicator direct event routing is not implemented; data is dropped");
-    delete _stream;
+    if (!m_node) {
+        zshim::todoPhaseBOnce("ZCom_ReplicatorAdvanced::sendDataDirect(no-node)",
+            "sendDataDirect() called before this replicator was attached to a node (addReplicator() calls setNode())");
+        delete _stream;
+        return;
+    }
+    m_node->ZCom_shimSendAdvancedData(this, _mode, _stream, _reference_id, _dest);
 }

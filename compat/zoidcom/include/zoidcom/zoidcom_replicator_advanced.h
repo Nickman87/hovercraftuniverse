@@ -2,9 +2,14 @@
 * zoidcom_replicator_advanced.h
 * ZoidCom-compatible shim
 *
-* TODO(phaseB): sendData()/sendDataDirect() are stubbed (log + drop) --
-* real delivery requires the node-to-node replication link that Phase A
-* does not implement. See docs/porting/zoidcom-compat.md.
+* Real (Phase B, step 4): sendData()/sendDataDirect() route through
+* ZCom_Node::ZCom_shimSendAdvancedData() for real delivery; onDataReceived()
+* is driven by ZCom_Node::ZCom_shimDeliverReplAdvanced(). See
+* docs/porting/phase-b-replication.md and compat/zoidcom/src/Node.cpp's
+* file header.
+*
+* TODO(phaseB): getLastUpdateTime() stays a stub -- unused by the one
+* concrete ZCom_ReplicatorAdvanced in this codebase (see Replicator.cpp).
 *****************************************/
 
 #ifndef _ZOIDREPLICATORADVANCED_H_

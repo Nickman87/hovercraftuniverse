@@ -74,6 +74,22 @@
 // the follow-up ZCom_cbConnectionClosed() is bookkeeping noise, not a
 // second, independent rejection notification.
 //
+// Real (Phase B, steps 3-4 -- see docs/porting/phase-b-replication.md and
+// compat/zoidcom/src/Node.cpp's file header for the full design):
+// ZCom_processReplicators() now drives ZCom_Node::ZCom_shimTickReplication()
+// for every node in this control's registry (both authority and linked
+// proxy/owner nodes are in nodes_by_netid, so one loop covers both send
+// directions -- AUTH_2_* and OWNER_2_AUTH). Two new wire messages carry the
+// resulting traffic:
+//   NODE_REPL_BATCH (kind 9)   both ways: a batch of primitive/
+//                              ZCom_ReplicatorBasic item updates for one
+//                              node, reliable or unreliable per the
+//                              sender's ZCOM_REPFLAG_MOSTRECENT choice.
+//   NODE_REPL_ADV (kind 10)    both ways: one ZCom_ReplicatorAdvanced
+//                              sendData()/sendDataDirect() payload.
+// Both are dispatched in ZCom_processInput() alongside NODE_EVENT, subject
+// to the same handshake-pending backstop.
+//
 // TODO(phaseB) stubs: Zoidlevels/ZCom_requestZoidMode, LAN discovery
 // (ZCom_Discover/ZCom_setDiscoverListener), lag/loss simulation.
 #include "zoidcom_shim_internal.h"
@@ -94,6 +110,8 @@ const zU8 kMsgNodeOwner       = 5;
 const zU8 kMsgNodeEvent       = 6;
 const zU8 kMsgConnRequest     = 7;  // client -> server: the ZCom_Connect() request bitstream
 const zU8 kMsgConnReply       = 8;  // server -> client: accept flag + ZCom_cbConnectionRequest()'s reply bitstream
+const zU8 kMsgNodeReplBatch   = 9;  // both ways: a primitive/ZCom_ReplicatorBasic item batch for one node
+const zU8 kMsgNodeReplAdv     = 10; // both ways: one ZCom_ReplicatorAdvanced sendData()/sendDataDirect() payload
 
 const size_t kMaxPeers = 64;
 const size_t kChannelCount = 2;
@@ -589,6 +607,57 @@ bool ZCom_Control::ZCom_shimSendNodeEvent(ZCom_ConnID _conn, ZCom_NodeID _netid,
     return enet_peer_send(it->second, channel, packet) == 0;
 }
 
+bool ZCom_Control::ZCom_shimSendNodeReplBatch(ZCom_ConnID _conn, ZCom_NodeID _netid, bool _reliable, ZCom_BitStream& _payload) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return false;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_netid, 32);
+    envelope.addInt(zshim::currentTimeMillis(), 32);
+    zU32 bits = _payload.getBitCount();
+    envelope.addInt(bits, 32);
+    if (bits) envelope.addBitStream(&_payload, true);
+
+    char buf[4096];
+    zU16 size = 0;
+    if (!envelope.Serialize(buf, &size, sizeof(buf))) return false;
+
+    zU8 channel = _reliable ? 0 : 1;
+    ENetPacket* packet = enet_packet_create(NULL, size + 1, _reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED);
+    packet->data[0] = kMsgNodeReplBatch;
+    if (size) memcpy(packet->data + 1, buf, size);
+    return enet_peer_send(it->second, channel, packet) == 0;
+}
+
+bool ZCom_Control::ZCom_shimSendNodeReplAdvanced(ZCom_ConnID _conn, ZCom_NodeID _netid, zU16 _item_index,
+                                                  eZCom_SendMode _mode, ZCom_BitStream* _stream, zU32 _reference_id) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return false;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_netid, 32);
+    envelope.addInt(_item_index, 16);
+    envelope.addInt(zshim::currentTimeMillis(), 32);
+    envelope.addInt(_reference_id, 32);
+    zU32 bits = _stream ? _stream->getBitCount() : 0;
+    envelope.addInt(bits, 32);
+    if (bits) envelope.addBitStream(_stream, true);
+
+    char buf[4096];
+    zU16 size = 0;
+    if (!envelope.Serialize(buf, &size, sizeof(buf))) return false;
+
+    // eZCom_UnreliableNotify's ack/loss correlation (onDataAcked/onDataLost)
+    // is not wired -- no current game code uses that mode (see
+    // Node.cpp's file header); treated the same as eZCom_Unreliable here.
+    bool reliable = (_mode == eZCom_ReliableOrdered || _mode == eZCom_ReliableUnordered);
+    zU8 channel = (_mode == eZCom_ReliableOrdered) ? 0 : 1;
+    ENetPacket* packet = enet_packet_create(NULL, size + 1, reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED);
+    packet->data[0] = kMsgNodeReplAdv;
+    if (size) memcpy(packet->data + 1, buf, size);
+    return enet_peer_send(it->second, channel, packet) == 0;
+}
+
 // --- the actual ENet pump ----------------------------------------------------
 
 void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
@@ -799,6 +868,37 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                         } else {
                             delete payload;
                         }
+                    } else if (kind == kMsgNodeReplBatch) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_NodeID netid = envelope.getInt(32);
+                        zU32 sent_time = envelope.getInt(32);
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* payload = bits ? envelope.getBitStream(bits, true) : NULL;
+
+                        ZCom_Node* node = ZCom_shimFindNetId(netid);
+                        if (node && payload) node->ZCom_shimApplyReplBatch(*payload, sent_time);
+                        delete payload;
+                    } else if (kind == kMsgNodeReplAdv) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_NodeID netid = envelope.getInt(32);
+                        zU16 item_index = (zU16) envelope.getInt(16);
+                        zU32 sent_time = envelope.getInt(32);
+                        zU32 reference_id = envelope.getInt(32);
+                        (void) reference_id; // onDataAcked/onDataLost not wired -- see ZCom_shimSendNodeReplAdvanced()
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* payload = bits ? envelope.getBitStream(bits, true) : new ZCom_BitStream();
+
+                        ZCom_Node* node = ZCom_shimFindNetId(netid);
+                        if (node) {
+                            eZCom_NodeRole remote_role = (node->getRole() == eZCom_RoleAuthority)
+                                ? node->ZCom_shimRemoteRoleFor(from_conn)
+                                : eZCom_RoleAuthority;
+                            node->ZCom_shimDeliverReplAdvanced(item_index, from_conn, remote_role, payload, sent_time);
+                        } else {
+                            delete payload;
+                        }
                     } else {
                         zshim::todoPhaseBOnce("ZCom_Control::ZCom_processInput(unknown-kind)",
                             "received a message kind this shim doesn't recognize");
@@ -855,11 +955,21 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
 }
 
 void ZCom_Control::ZCom_processReplicators(zU32 _simulation_time_passed) {
-    (void) _simulation_time_passed;
-    zshim::todoPhaseBOnce("ZCom_Control::ZCom_processReplicators",
-        "no live replication tick yet: registered ZCom_ReplicatorBasic/Advanced instances are never polled "
-        "(checkState()/packData()/unpackData()/Process() are not called) -- this is step 3, out of scope for "
-        "the node-linking/event-delivery pass");
+    // Every node with an active network id on this control -- both
+    // authority nodes (self-bound at registration) and linked proxy/owner
+    // nodes (bound on NODE_CREATE/NODE_LINK_UNIQUE receipt) live in
+    // nodes_by_netid, so this one loop drives both send directions
+    // (AUTH_2_* from authority nodes, OWNER_2_AUTH from owner nodes). See
+    // Node.cpp's file header for the full tick design.
+    std::vector<ZCom_Node*> nodes;
+    nodes.reserve(m_priv->nodes_by_netid.size());
+    for (std::map<ZCom_NodeID, ZCom_Node*>::iterator it = m_priv->nodes_by_netid.begin();
+         it != m_priv->nodes_by_netid.end(); ++it) {
+        nodes.push_back(it->second);
+    }
+    for (size_t i = 0; i < nodes.size(); i++) {
+        nodes[i]->ZCom_shimTickReplication(_simulation_time_passed);
+    }
 }
 
 void ZCom_Control::ZCom_processOutput() {

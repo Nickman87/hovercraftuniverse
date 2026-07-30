@@ -164,6 +164,24 @@ public:
   void ZCom_shimSendNodeOwner( ZCom_ConnID _conn, ZCom_NodeID _netid, bool _enabled );
   void ZCom_shimSendNodeRemove( ZCom_ConnID _conn, ZCom_NodeID _netid );
   bool ZCom_shimSendNodeEvent( ZCom_ConnID _conn, ZCom_NodeID _netid, eZCom_SendMode _mode, ZCom_BitStream* _data );
+
+  /* ---------------------------------------------------------------------
+   * Phase B steps 3-4: wire sends for the replication tick. NOT part of
+   * the real ZoidCom API. See docs/porting/phase-b-replication.md and this
+   * file's header.
+   * ------------------------------------------------------------------ */
+
+  /// Sends a pre-built primitive/ZCom_ReplicatorBasic item batch (see
+  /// ZCom_Node::ZCom_shimTickReplication()) to _conn, wrapped with _netid
+  /// and a send timestamp, reliable or unreliable per _reliable.
+  bool ZCom_shimSendNodeReplBatch( ZCom_ConnID _conn, ZCom_NodeID _netid, bool _reliable, ZCom_BitStream& _payload );
+
+  /// Sends one ZCom_ReplicatorAdvanced::sendData()/sendDataDirect() payload
+  /// to _conn, wrapped with _netid, _item_index (this node's
+  /// replication_items position of the sending replicator), a send
+  /// timestamp and _reference_id, at the reliability _mode implies.
+  bool ZCom_shimSendNodeReplAdvanced( ZCom_ConnID _conn, ZCom_NodeID _netid, zU16 _item_index,
+    eZCom_SendMode _mode, ZCom_BitStream* _stream, zU32 _reference_id );
 };
 
 #endif

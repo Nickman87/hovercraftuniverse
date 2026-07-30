@@ -38,29 +38,118 @@
 //     mandatory, cannot be gated -- matches real semantics) and on receiving
 //     a NODE_REMOVE.
 //
-// Still TODO(phaseB) stubs, all logged once via zshim::todoPhaseBOnce():
-//   - Data replication (addReplicationInt/Float/Bool/String/StringW,
-//     addInterpolationInt/Float, addReplicator): parameters are recorded
-//     for bookkeeping (so autodelete and getSetup() etc. still work) but
-//     values are never synced across the network. This is step 3 of
-//     docs/porting/phase-b-replication.md, deliberately out of scope here.
+// Real (Phase B, steps 3-4 -- see docs/porting/phase-b-replication.md and
+// docs/porting/zoidcom-original-semantics.md):
+//   - addReplicationInt/Bool/Float/String/StringW now store their _bits/
+//     _mantissa_bits/_maxlen/_flags/_rules/_mindelay/_maxdelay parameters
+//     (previously discarded via (void) casts) and are driven for real by
+//     ZCom_shimTickReplication(), called once per node from
+//     ZCom_Control::ZCom_processReplicators(). Dirty detection is a shadow
+//     copy per item; MOSTRECENT sends unreliable and additionally resends
+//     on maxdelay elapsed (a dropped final update must not leave a
+//     permanently stale value); non-MOSTRECENT sends reliable, once, on
+//     change only. mindelay throttles resends (but never suppresses a
+//     maxdelay-forced resend). This tracking is node-scoped, not
+//     per-connection -- see the file's "batch" comment below for why that
+//     is an acceptable simplification here.
+//   - addReplicator()-registered ZCom_ReplicatorBasic subclasses
+//     (OgreVector3_Replicator, OgreQuaternion_Replicator, String_Replicator)
+//     are driven the same tick: checkState() (which does its own dirty
+//     comparison internally, see e.g. OgreVector3_Replicator::checkState())
+//     gates packData()/unpackData(), honouring the *setup's* flags/rules/
+//     mindelay/maxdelay exactly like the primitive paths. Per
+//     phase-b-replication.md §3.4 this is not a refinement -- it is the
+//     only mechanism that moves mPosition/mOrientation/mVelocity, since the
+//     game never uses primitive replication for those fields.
+//   - addReplicator()-registered ZCom_ReplicatorAdvanced subclasses (the
+//     game has exactly one concrete instance: EntityPropertyMapReplicator)
+//     get Process() driven once per tick when ZCOM_REPLICATOR_CALLPROCESS
+//     is set, and their sendData()/sendDataDirect() calls (see
+//     Replicator.cpp) are delivered immediately via
+//     ZCom_shimSendAdvancedData() rather than deferred to onPreSendData().
+//     That is a deliberate deviation from real ZoidCom's documented timing
+//     ("wait for onPreSendData() ... to generate data which is sent
+//     immediately") -- but EntityPropertyMapReplicator's own onPreSendData()
+//     override is an empty {} (confirmed in EntityPropertySystem.h), so the
+//     game never relies on that hook, and immediate delivery is strictly
+//     simpler with no observable behavioral difference. onConnectionAdded/
+//     onConnectionRemoved/onLocalRoleChanged/onRemoteRoleChanged are wired
+//     to the existing link/owner-change bookkeeping below.
+//     onPacketReceived() is deliberately NOT driven: the header states its
+//     only real consumer is ZCom_MovementReplicator (which this game does
+//     not have), and EntityPropertyMapReplicator's own override is an empty
+//     {} -- driving it would add per-packet bookkeeping with zero
+//     observable effect. getLastUpdateTime() stays a todoPhaseBOnce stub
+//     for the same reason: unused by the one concrete Advanced replicator
+//     in this codebase (mindelay/maxdelay are explicitly not enforced for
+//     Advanced replicators, so it has no self-timing need).
+//   - dependsOn() now records the dependency edge (for API completeness/
+//     introspection) but does not reorder anything: our tick already
+//     processes every registered node's full item set per call, with no
+//     priority/partial-scheduling model for dependsOn() to influence.
+//
+// Batching: ZCom_shimTickReplication() computes the dirty set once per
+// node per tick (matching the real library's documented "checkState() is
+// called once per ZCom_processOutput(), not per connection" -- see
+// zoidcom-original-semantics.md §8) and then fans the *same* precomputed
+// payload out to every relevant connection, at most one reliable and one
+// unreliable envelope per connection (see Control.cpp's kMsgNodeReplBatch).
+// Because dirty tracking is node-scoped rather than per-connection, a
+// MOSTRECENT item's maxdelay-driven resend timer is also node-scoped: with
+// more than one linked connection, all of them get resent to on the same
+// schedule rather than each independently. This does not create an
+// observable bug for anything in this codebase (a brand-new connection
+// gets the *current* value via its eZCom_EventInit snapshot, not by
+// waiting for the next dirty tick -- see phase-b-replication.md §3.2), but
+// is a documented divergence from a hypothetically bit-exact per-connection
+// implementation.
+//
+// Remaining TODO(phaseB) stubs, all logged once via zshim::todoPhaseBOnce():
+//   - addInterpolationInt/addInterpolationFloat (unused by any current call
+//     site -- the one call site is commented out, see Entity.cpp).
 //   - registerNodeByTag/Zoidlevels, mustsync/authority migration (beyond
 //     setOwner), file transfer.
 // See docs/porting/zoidcom-compat.md for the full design rationale.
 #include "zoidcom_shim_internal.h"
 #include <vector>
 #include <map>
+#include <set>
 #include <deque>
+#include <string>
+#include <cstring>
+#include <cwchar>
 
 namespace {
 
 struct ReplicationItem {
-    // Bookkeeping only -- see file header. Kept so the API is faithfully
-    // shaped even though nothing consumes this list yet (step 3).
     enum Kind { Int, Bool, Float, String, StringW, InterpInt, InterpFloat, CustomReplicator } kind;
     void* ptr;
     ZCom_Replicator* replicator;
     bool autodelete;
+
+    // Step 3 metadata -- previously discarded via (void) casts in
+    // addReplicationInt/Bool/Float/String/StringW, now used to drive the
+    // real replication tick (ZCom_Node::ZCom_shimTickReplication()). For a
+    // CustomReplicator item, flags/rules/mindelay/maxdelay are refreshed
+    // every tick straight from the replicator's own ZCom_ReplicatorSetup
+    // instead (see the CustomReplicator case in ZCom_shimTickReplication()).
+    zU8 bits;        // Int: wire width. Float: mantissa bits.
+    bool sign;       // Int only: signed vs unsigned wire encoding.
+    zU16 maxlen;     // String/StringW only: destination buffer capacity.
+    zU8 flags;       // ZCOM_REPFLAG_*
+    zU8 rules;       // ZCOM_REPRULE_*
+    zS16 mindelay;
+    zS16 maxdelay;
+
+    // Shadow/dirty-tracking state. Node-scoped, not per-connection -- see
+    // the file header's "Batching" note.
+    bool has_shadow;
+    zS32 shadow_int;
+    bool shadow_bool;
+    zFloat shadow_float;
+    std::string shadow_str;
+    std::wstring shadow_wstr;
+    zU32 last_send_time;
 };
 
 // Authority-side bookkeeping for one connection this node is relevant to.
@@ -94,6 +183,9 @@ public:
     std::vector<ReplicationItem> replication_items;
     ZCom_NodeReplicationInterceptor* replication_interceptor;
     ZCom_NodeEventInterceptor* event_interceptor;
+
+    // dependsOn() bookkeeping -- see file header, recorded but not acted on.
+    std::set<ZCom_Node*> dependencies;
 
     std::map<ZCom_ConnID, void*> conn_user_data;
     void* global_user_data;
@@ -147,6 +239,26 @@ public:
         if (announce_data) delete announce_data;
     }
 };
+
+namespace {
+
+// Calls fn(ZCom_ReplicatorAdvanced*) for every ZCOM_REPLICATOR_ADVANCED item
+// registered on this node -- used to drive onConnectionAdded/
+// onConnectionRemoved/onLocalRoleChanged/onRemoteRoleChanged "in the
+// documented order" (i.e. as their trigger condition occurs) from the
+// link/owner-change bookkeeping below. See the file header's step 3-4 note.
+template <typename Fn>
+void forEachAdvancedReplicator(ZCom_Node_Private* p, Fn fn) {
+    for (size_t i = 0; i < p->replication_items.size(); i++) {
+        ReplicationItem& item = p->replication_items[i];
+        if (item.kind == ReplicationItem::CustomReplicator && item.replicator &&
+            (item.replicator->getFlags() & ZCOM_REPLICATOR_ADVANCED)) {
+            fn(static_cast<ZCom_ReplicatorAdvanced*>(item.replicator));
+        }
+    }
+}
+
+} // namespace
 
 ZCom_Node::ZCom_Node(void) : m_priv(new ZCom_Node_Private()) {}
 
@@ -289,8 +401,15 @@ zS32 ZCom_Node::getRelevantConnections(ZCom_ConnID* _conns, zU32 _max, zU32* _co
 }
 
 void ZCom_Node::dependsOn(ZCom_Node* _othernode, eZCom_DependencyOpt _opt) {
-    (void) _othernode; (void) _opt;
-    zshim::todoPhaseBOnce("ZCom_Node::dependsOn", "replication ordering dependencies are not tracked (step 3 item)");
+    // Recorded but not acted on -- see file header. No current call site
+    // exists in the game (confirmed by grep), and our tick has no
+    // priority/partial-scheduling model for a dependency edge to reorder.
+    if (!_othernode) return;
+    if (_opt == eZCom_AddDependency) {
+        m_priv->dependencies.insert(_othernode);
+    } else {
+        m_priv->dependencies.erase(_othernode);
+    }
 }
 
 void ZCom_Node::applyForZoidLevel(zU8 _level) {
@@ -337,7 +456,14 @@ void ZCom_Node::setOwner(ZCom_ConnID _id, bool _enabled) {
         // _id isn't (yet) relevant to this node -- legitimate no-op.
         return;
     }
-    it->second.role = _enabled ? eZCom_RoleOwner : eZCom_RoleProxy;
+    eZCom_NodeRole oldrole = it->second.role;
+    eZCom_NodeRole newrole = _enabled ? eZCom_RoleOwner : eZCom_RoleProxy;
+    it->second.role = newrole;
+    if (oldrole != newrole) {
+        forEachAdvancedReplicator(m_priv, [_id, oldrole, newrole](ZCom_ReplicatorAdvanced* rep) {
+            rep->onRemoteRoleChanged(_id, oldrole, newrole);
+        });
+    }
     if (it->second.announced && m_priv->control) {
         m_priv->control->ZCom_shimSendNodeOwner(_id, m_priv->network_id, _enabled);
     }
@@ -374,38 +500,37 @@ bool ZCom_Node::beginReplicationSetup(zU16 _replicators_max) {
 void ZCom_Node::setInterceptID(ZCom_InterceptID _id) { (void) _id; }
 
 void ZCom_Node::addReplicationInt(zS32* _ptr, zU8 _bits, bool _sign, zU8 _flags, zU8 _rules, zS16 _mindelay, zS16 _maxdelay) {
-    (void) _bits; (void) _sign; (void) _flags; (void) _rules; (void) _mindelay; (void) _maxdelay;
     ReplicationItem item = { ReplicationItem::Int, _ptr, NULL, false };
+    item.bits = _bits; item.sign = _sign; item.flags = _flags; item.rules = _rules;
+    item.mindelay = _mindelay; item.maxdelay = _maxdelay;
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicationInt", "registered replication fields are never synced across the network (step 3)");
 }
 
 void ZCom_Node::addReplicationBool(bool* _ptr, zU8 _flags, zU8 _rules, zS16 _mindelay, zS16 _maxdelay) {
-    (void) _flags; (void) _rules; (void) _mindelay; (void) _maxdelay;
     ReplicationItem item = { ReplicationItem::Bool, _ptr, NULL, false };
+    item.flags = _flags; item.rules = _rules; item.mindelay = _mindelay; item.maxdelay = _maxdelay;
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicationBool", "registered replication fields are never synced across the network (step 3)");
 }
 
 void ZCom_Node::addReplicationFloat(zFloat* _ptr, zU8 _mantissa_bits, zU8 _flags, zU8 _rules, zS16 _mindelay, zS16 _maxdelay) {
-    (void) _mantissa_bits; (void) _flags; (void) _rules; (void) _mindelay; (void) _maxdelay;
     ReplicationItem item = { ReplicationItem::Float, _ptr, NULL, false };
+    item.bits = _mantissa_bits; item.flags = _flags; item.rules = _rules;
+    item.mindelay = _mindelay; item.maxdelay = _maxdelay;
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicationFloat", "registered replication fields are never synced across the network (step 3)");
 }
 
 void ZCom_Node::addReplicationString(char* _str, zU16 _maxlen, zU8 _flags, zU8 _rules, zS16 _mindelay, zS16 _maxdelay) {
-    (void) _maxlen; (void) _flags; (void) _rules; (void) _mindelay; (void) _maxdelay;
     ReplicationItem item = { ReplicationItem::String, _str, NULL, false };
+    item.maxlen = _maxlen; item.flags = _flags; item.rules = _rules;
+    item.mindelay = _mindelay; item.maxdelay = _maxdelay;
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicationString", "registered replication fields are never synced across the network (step 3)");
 }
 
 void ZCom_Node::addReplicationStringW(wchar_t* _str, zU16 _maxlen, zU8 _flags, zU8 _rules, zS16 _mindelay, zS16 _maxdelay) {
-    (void) _maxlen; (void) _flags; (void) _rules; (void) _mindelay; (void) _maxdelay;
     ReplicationItem item = { ReplicationItem::StringW, _str, NULL, false };
+    item.maxlen = _maxlen; item.flags = _flags; item.rules = _rules;
+    item.mindelay = _mindelay; item.maxdelay = _maxdelay;
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicationStringW", "registered replication fields are never synced across the network (step 3)");
 }
 
 void ZCom_Node::addInterpolationInt(zS32* _ptr, zU8 _bits, bool _sign, zU8 _flags, zU8 _rules, zS32 _treshold, zS32* _dst,
@@ -434,10 +559,13 @@ void ZCom_Node::addReplicator(ZCom_Replicator* _rep, bool _autodelete) {
     // OgreQuaternion_Replicator, String_Replicator,
     // EntityPropertyMapReplicator) already ORs in
     // ZCOM_REPLICATOR_INITIALIZED itself in its own constructor.
+    if (_rep && (_rep->getFlags() & ZCOM_REPLICATOR_ADVANCED)) {
+        // Real contract: "will get called automatically by
+        // ZCom_Node::addReplicator()" -- see zoidcom_replicator_advanced.h.
+        static_cast<ZCom_ReplicatorAdvanced*>(_rep)->setNode(this);
+    }
     ReplicationItem item = { ReplicationItem::CustomReplicator, NULL, _rep, _autodelete };
     m_priv->replication_items.push_back(item);
-    zshim::todoPhaseBOnce("ZCom_Node::addReplicator",
-        "custom replicators are stored (and autodeleted with the node) but never driven by a replication tick (step 3)");
 }
 
 bool ZCom_Node::endReplicationSetup(void) { return true; }
@@ -622,12 +750,23 @@ void ZCom_Node::ZCom_shimFlushPendingAnnouncements() {
         }
         entry.announced = true;
         noteConnectionLinkedEventInit(conn);
+
+        eZCom_NodeRole role_for_conn = entry.role;
+        forEachAdvancedReplicator(m_priv, [conn, role_for_conn](ZCom_ReplicatorAdvanced* rep) {
+            rep->onConnectionAdded(conn, role_for_conn);
+        });
     }
 }
 
 void ZCom_Node::ZCom_shimSetOwnerRole(bool _is_owner) {
     if (m_priv->role == eZCom_RoleAuthority) return; // meaningless on the authority itself
-    m_priv->role = _is_owner ? eZCom_RoleOwner : eZCom_RoleProxy;
+    eZCom_NodeRole oldrole = m_priv->role;
+    eZCom_NodeRole newrole = _is_owner ? eZCom_RoleOwner : eZCom_RoleProxy;
+    if (oldrole == newrole) return;
+    m_priv->role = newrole;
+    forEachAdvancedReplicator(m_priv, [oldrole, newrole](ZCom_ReplicatorAdvanced* rep) {
+        rep->onLocalRoleChanged(oldrole, newrole);
+    });
 }
 
 void ZCom_Node::ZCom_shimDeliverEvent(eZCom_Event _type, eZCom_NodeRole _remote_role, ZCom_ConnID _conn_id,
@@ -647,6 +786,9 @@ void ZCom_Node::ZCom_shimNoteConnectionClosed(ZCom_ConnID _conn) {
         if (it != m_priv->linked_conns.end()) {
             eZCom_NodeRole was = it->second.role;
             m_priv->linked_conns.erase(it);
+            forEachAdvancedReplicator(m_priv, [_conn, was](ZCom_ReplicatorAdvanced* rep) {
+                rep->onConnectionRemoved(_conn, was);
+            });
             if (m_priv->notify_onremove) {
                 pushEvent(eZCom_EventRemoved, was, _conn, NULL, zshim::currentTimeMillis());
             }
@@ -665,4 +807,327 @@ void ZCom_Node::ZCom_shimNoteConnectionClosed(ZCom_ConnID _conn) {
 eZCom_NodeRole ZCom_Node::ZCom_shimRemoteRoleFor(ZCom_ConnID _conn) const {
     std::map<ZCom_ConnID, LinkedConn>::const_iterator it = m_priv->linked_conns.find(_conn);
     return it == m_priv->linked_conns.end() ? eZCom_RoleProxy : it->second.role;
+}
+
+// --- Phase B steps 3-4: the replication tick --------------------------------
+
+namespace {
+
+// One dirty item computed this tick, ready to fan out to every connection
+// whose rule/role combination wants it. Owns `payload` until sent.
+struct PendingReplItem {
+    zU16 index;
+    zU8 rules;
+    bool unreliable; // ZCOM_REPFLAG_MOSTRECENT -- see file header
+    ZCom_BitStream* payload;
+};
+
+} // namespace
+
+void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
+    if (!m_priv->registered || !m_priv->control || m_priv->network_id == 0) return;
+
+    zU32 now = zshim::currentTimeMillis();
+
+    // --- Advanced replicators: Process() once per tick, only if the
+    // replicator opted into ZCOM_REPLICATOR_CALLPROCESS. Any sendData()/
+    // sendDataDirect() call the replicator makes from inside Process() is
+    // delivered synchronously via ZCom_shimSendAdvancedData() -- see the
+    // file header for why this doesn't wait for onPreSendData().
+    for (size_t i = 0; i < m_priv->replication_items.size(); i++) {
+        ReplicationItem& item = m_priv->replication_items[i];
+        if (item.kind != ReplicationItem::CustomReplicator || !item.replicator) continue;
+        if (!(item.replicator->getFlags() & ZCOM_REPLICATOR_ADVANCED)) continue;
+        if (item.replicator->callProcess()) {
+            item.replicator->Process(m_priv->role, _simulation_time_passed);
+        }
+    }
+
+    // A plain (non-owner) proxy has no rule that lets it send anything back
+    // -- matches sendEvent()'s existing "no ZCOM_REPRULE_PROXY_2_AUTH" logic.
+    if (m_priv->role != eZCom_RoleAuthority && m_priv->role != eZCom_RoleOwner) return;
+
+    // --- Compute the dirty set once for this tick (primitives + Basic
+    // custom replicators). Advanced replicators are excluded here -- they
+    // are driven entirely through Process()/sendData() above.
+    std::vector<PendingReplItem> pending;
+    pending.reserve(m_priv->replication_items.size());
+
+    for (size_t i = 0; i < m_priv->replication_items.size(); i++) {
+        ReplicationItem& item = m_priv->replication_items[i];
+        bool mostrecent = (item.flags & ZCOM_REPFLAG_MOSTRECENT) != 0;
+        bool throttled = item.mindelay >= 0 && item.has_shadow &&
+                         (now - item.last_send_time < (zU32) item.mindelay);
+        bool resend = mostrecent && item.maxdelay >= 0 && item.has_shadow &&
+                      (now - item.last_send_time >= (zU32) item.maxdelay);
+        ZCom_BitStream* payload = NULL;
+        bool dirty = false;
+
+        switch (item.kind) {
+        case ReplicationItem::Int: {
+            zS32 cur = *(zS32*) item.ptr;
+            bool changed = !item.has_shadow || cur != item.shadow_int;
+            if ((changed || resend) && !(throttled && !resend)) {
+                payload = new ZCom_BitStream();
+                if (item.sign) payload->addSignedInt(cur, item.bits);
+                else payload->addInt((zU32) cur, item.bits);
+                item.shadow_int = cur; item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        case ReplicationItem::Bool: {
+            bool cur = *(bool*) item.ptr;
+            bool changed = !item.has_shadow || cur != item.shadow_bool;
+            if ((changed || resend) && !(throttled && !resend)) {
+                payload = new ZCom_BitStream();
+                payload->addBool(cur);
+                item.shadow_bool = cur; item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        case ReplicationItem::Float: {
+            zFloat cur = *(zFloat*) item.ptr;
+            bool changed = !item.has_shadow || cur != item.shadow_float;
+            if ((changed || resend) && !(throttled && !resend)) {
+                payload = new ZCom_BitStream();
+                payload->addFloat(cur, item.bits);
+                item.shadow_float = cur; item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        case ReplicationItem::String: {
+            const char* cur = (const char*) item.ptr;
+            bool changed = !item.has_shadow || item.shadow_str != cur;
+            if ((changed || resend) && !(throttled && !resend)) {
+                payload = new ZCom_BitStream();
+                payload->addString(cur);
+                item.shadow_str = cur; item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        case ReplicationItem::StringW: {
+            const wchar_t* cur = (const wchar_t*) item.ptr;
+            bool changed = !item.has_shadow || item.shadow_wstr != cur;
+            if ((changed || resend) && !(throttled && !resend)) {
+                payload = new ZCom_BitStream();
+                payload->addStringW(cur);
+                item.shadow_wstr = cur; item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        case ReplicationItem::CustomReplicator: {
+            if (!item.replicator || !(item.replicator->getFlags() & ZCOM_REPLICATOR_BASIC)) break;
+            ZCom_ReplicatorBasic* rb = static_cast<ZCom_ReplicatorBasic*>(item.replicator);
+            ZCom_ReplicatorSetup* setup = rb->getSetup();
+            // The setup is the authoritative source of flags/rules/delays
+            // for a custom replicator (the addReplicator() caller passes
+            // them there, not to ZCom_Node) -- refresh the item's copies
+            // every tick so pending-item construction below can treat all
+            // kinds uniformly.
+            item.flags = setup ? setup->getFlags() : 0;
+            item.rules = setup ? setup->getRules() : item.rules;
+            item.mindelay = setup ? setup->getMinDelay() : (zS16) -1;
+            item.maxdelay = setup ? setup->getMaxDelay() : (zS16) -1;
+            mostrecent = (item.flags & ZCOM_REPFLAG_MOSTRECENT) != 0;
+            throttled = item.mindelay >= 0 && item.has_shadow &&
+                        (now - item.last_send_time < (zU32) item.mindelay);
+            resend = mostrecent && item.maxdelay >= 0 && item.has_shadow &&
+                     (now - item.last_send_time >= (zU32) item.maxdelay);
+            if (throttled && !resend) break;
+            // checkState() has its own dirty-tracking side effect (see e.g.
+            // OgreVector3_Replicator::checkState()'s mCompare) and must run
+            // to keep that internal state correct -- but only when we are
+            // not throttled, so a value that keeps changing during a
+            // mindelay window is still only detected/sent at most that
+            // often (delayed detection, not lost detection).
+            bool changed = rb->checkState();
+            if (changed || resend) {
+                payload = new ZCom_BitStream();
+                rb->packData(payload);
+                item.has_shadow = true; item.last_send_time = now;
+                dirty = true;
+            }
+            break;
+        }
+        default: break;
+        }
+
+        if (dirty && payload) {
+            PendingReplItem p;
+            p.index = (zU16) i;
+            p.rules = item.rules;
+            p.unreliable = mostrecent;
+            p.payload = payload;
+            pending.push_back(p);
+        } else if (payload) {
+            delete payload;
+        }
+    }
+
+    if (!pending.empty()) {
+        // --- Distribute to every relevant connection, per direction rules,
+        // batched into at most one reliable + one unreliable envelope per
+        // connection (see phase-b-replication.md §4's "batch per node per
+        // tick" guidance and Control.cpp's kMsgNodeReplBatch).
+        std::vector<ZCom_ConnID> targets;
+        std::map<ZCom_ConnID, eZCom_NodeRole> target_role;
+        if (m_priv->role == eZCom_RoleAuthority) {
+            for (std::map<ZCom_ConnID, LinkedConn>::iterator it = m_priv->linked_conns.begin();
+                 it != m_priv->linked_conns.end(); ++it) {
+                targets.push_back(it->first);
+                target_role[it->first] = it->second.role;
+            }
+        } else { // eZCom_RoleOwner
+            if (m_priv->authority_conn != ZCom_Invalid_ID) targets.push_back(m_priv->authority_conn);
+        }
+
+        for (size_t t = 0; t < targets.size(); t++) {
+            ZCom_ConnID conn = targets[t];
+            ZCom_BitStream reliable_env, unreliable_env;
+            zU16 reliable_count = 0, unreliable_count = 0;
+
+            for (size_t p = 0; p < pending.size(); p++) {
+                bool applies;
+                if (m_priv->role == eZCom_RoleAuthority) {
+                    eZCom_NodeRole cr = target_role[conn];
+                    bool to_proxy = (pending[p].rules & ZCOM_REPRULE_AUTH_2_PROXY) != 0 && cr == eZCom_RoleProxy;
+                    bool to_owner = (pending[p].rules & ZCOM_REPRULE_AUTH_2_OWNER) != 0 && cr == eZCom_RoleOwner;
+                    applies = to_proxy || to_owner;
+                } else {
+                    applies = (pending[p].rules & ZCOM_REPRULE_OWNER_2_AUTH) != 0;
+                }
+                if (!applies) continue;
+
+                ZCom_BitStream& env = pending[p].unreliable ? unreliable_env : reliable_env;
+                zU16& count = pending[p].unreliable ? unreliable_count : reliable_count;
+                env.addInt(pending[p].index, 16);
+                zU32 bits = pending[p].payload->getBitCount();
+                env.addInt(bits, 16);
+                env.addBitStream(pending[p].payload, true);
+                count++;
+            }
+
+            if (reliable_count > 0) {
+                ZCom_BitStream out;
+                out.addInt(reliable_count, 16);
+                out.addBitStream(&reliable_env, true);
+                m_priv->control->ZCom_shimSendNodeReplBatch(conn, m_priv->network_id, true, out);
+            }
+            if (unreliable_count > 0) {
+                ZCom_BitStream out;
+                out.addInt(unreliable_count, 16);
+                out.addBitStream(&unreliable_env, true);
+                m_priv->control->ZCom_shimSendNodeReplBatch(conn, m_priv->network_id, false, out);
+            }
+        }
+    }
+
+    for (size_t p = 0; p < pending.size(); p++) delete pending[p].payload;
+}
+
+void ZCom_Node::ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, zU32 _estimated_time_sent) {
+    zU16 count = (zU16) _envelope.getInt(16);
+    for (zU16 i = 0; i < count; i++) {
+        zU16 index = (zU16) _envelope.getInt(16);
+        zU32 bits = _envelope.getInt(16);
+        ZCom_BitStream* sub = _envelope.getBitStream(bits, true);
+
+        if (index < m_priv->replication_items.size()) {
+            ReplicationItem& item = m_priv->replication_items[index];
+            switch (item.kind) {
+            case ReplicationItem::Int:
+                if (item.sign) *(zS32*) item.ptr = sub->getSignedInt(item.bits);
+                else *(zS32*) item.ptr = (zS32) sub->getInt(item.bits);
+                break;
+            case ReplicationItem::Bool:
+                *(bool*) item.ptr = sub->getBool();
+                break;
+            case ReplicationItem::Float:
+                *(zFloat*) item.ptr = sub->getFloat(item.bits);
+                break;
+            case ReplicationItem::String:
+                sub->getString((char*) item.ptr, item.maxlen);
+                break;
+            case ReplicationItem::StringW:
+                sub->getStringW((wchar_t*) item.ptr, item.maxlen);
+                break;
+            case ReplicationItem::CustomReplicator:
+                if (item.replicator && (item.replicator->getFlags() & ZCOM_REPLICATOR_BASIC)) {
+                    static_cast<ZCom_ReplicatorBasic*>(item.replicator)->unpackData(sub, true, _estimated_time_sent);
+                }
+                break;
+            default: break;
+            }
+        }
+        delete sub;
+    }
+}
+
+void ZCom_Node::ZCom_shimSendAdvancedData(ZCom_Replicator* _rep, eZCom_SendMode _mode, ZCom_BitStream* _stream,
+                                           zU32 _reference_id, ZCom_ConnID _direct_dest) {
+    if (!m_priv->control || !_rep) { delete _stream; return; }
+
+    // Find this replicator's item index -- both peers built their
+    // replication_items list identically via the same setupReplication(),
+    // so the index doubles as a stable cross-peer identifier (see
+    // phase-b-replication.md §3), letting the receiver's onDataReceived()
+    // dispatch to the matching replicator instance.
+    zU16 index = 0xFFFF;
+    for (size_t i = 0; i < m_priv->replication_items.size(); i++) {
+        if (m_priv->replication_items[i].replicator == _rep) { index = (zU16) i; break; }
+    }
+    if (index == 0xFFFF) {
+        zshim::todoPhaseBOnce("ZCom_Node::ZCom_shimSendAdvancedData(unregistered-replicator)",
+            "sendData()/sendDataDirect() called from a ZCom_ReplicatorAdvanced not found in its node's replication_items");
+        delete _stream;
+        return;
+    }
+
+    if (_direct_dest != ZCom_Invalid_ID) {
+        m_priv->control->ZCom_shimSendNodeReplAdvanced(_direct_dest, m_priv->network_id, index, _mode, _stream, _reference_id);
+        delete _stream;
+        return;
+    }
+
+    // Broadcast, filtered per the setup's replication rule direction -- the
+    // real contract for sendData(): "all replicators which normally
+    // receive data from this replicator, too" (see
+    // zoidcom-original-semantics.md §7). Same direction semantics as the
+    // primitive/basic replication tick and sendEvent().
+    ZCom_ReplicatorSetup* setup = _rep->getSetup();
+    zU8 rules = setup ? setup->getRules() : 0;
+
+    if (m_priv->role == eZCom_RoleAuthority) {
+        for (std::map<ZCom_ConnID, LinkedConn>::iterator it = m_priv->linked_conns.begin();
+             it != m_priv->linked_conns.end(); ++it) {
+            bool to_proxy = (rules & ZCOM_REPRULE_AUTH_2_PROXY) != 0 && it->second.role == eZCom_RoleProxy;
+            bool to_owner = (rules & ZCOM_REPRULE_AUTH_2_OWNER) != 0 && it->second.role == eZCom_RoleOwner;
+            if (to_proxy || to_owner) {
+                m_priv->control->ZCom_shimSendNodeReplAdvanced(it->first, m_priv->network_id, index, _mode, _stream, _reference_id);
+            }
+        }
+    } else if (m_priv->role == eZCom_RoleOwner) {
+        if ((rules & ZCOM_REPRULE_OWNER_2_AUTH) != 0 && m_priv->authority_conn != ZCom_Invalid_ID) {
+            m_priv->control->ZCom_shimSendNodeReplAdvanced(m_priv->authority_conn, m_priv->network_id, index, _mode, _stream, _reference_id);
+        }
+    }
+    delete _stream;
+}
+
+void ZCom_Node::ZCom_shimDeliverReplAdvanced(zU16 _item_index, ZCom_ConnID _from_conn, eZCom_NodeRole _remote_role,
+                                              ZCom_BitStream* _payload, zU32 _estimated_time_sent) {
+    if (_item_index < m_priv->replication_items.size()) {
+        ReplicationItem& item = m_priv->replication_items[_item_index];
+        if (item.kind == ReplicationItem::CustomReplicator && item.replicator &&
+            (item.replicator->getFlags() & ZCOM_REPLICATOR_ADVANCED)) {
+            static_cast<ZCom_ReplicatorAdvanced*>(item.replicator)->onDataReceived(
+                _from_conn, _remote_role, *_payload, true, _estimated_time_sent);
+        }
+    }
+    delete _payload;
 }
