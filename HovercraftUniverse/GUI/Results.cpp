@@ -9,7 +9,10 @@ namespace HovUni {
 
 	bool Results::addPlayer(int position, const Ogre::String& name, long time) {
 		try{
-			this->callFunction("addPosition", Hikari::Args(position)(name)(time));
+			// See Countdown.cpp's Countdown::start for why the `long` needs
+			// an explicit int cast here (ambiguous FlashValue(int) vs.
+			// FlashValue(Ogre::Real) overload resolution under v143).
+			this->callFunction("addPosition", Hikari::Args(position)(name)((int)time));
 		} catch (OverlayNotActivatedException) {
 			//Ignore
 			return false;

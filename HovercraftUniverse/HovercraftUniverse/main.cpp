@@ -5,6 +5,10 @@
 #include "Console.h"
 #include <OgreString.h>
 #include "Exception.h"
+// Modern-build fix (docs/porting/hikari-gui.md): ZoidCom's declaration is
+// needed directly here (previously only ever compiled transitively via
+// some other header in the VC9 project's precompiled-header chain).
+#include <zoidcom/zoidcom.h>
 
 void process_zoidcom_log(const char *_log) {
 	Ogre::LogManager::getSingleton().getDefaultLog()->stream() << _log;
@@ -28,8 +32,11 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 	Ogre::String host = "localhost";
 	//parse all commandline parameters (seperated by spaces)
 	Ogre::String commandline (strCmdLine);
-	Ogre::vector<Ogre::String>::type result = Ogre::StringUtil::split(commandline, " ");
-	for (Ogre::vector<Ogre::String>::type::iterator i = result.begin(); i != result.end(); i++ ) {
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): the
+	// Ogre::vector<T>::type STLAllocator-wrapper idiom is gone; modern Ogre
+	// (and StringUtil::split's return type) just uses std::vector<T>.
+	std::vector<Ogre::String> result = Ogre::StringUtil::split(commandline, " ");
+	for (std::vector<Ogre::String>::iterator i = result.begin(); i != result.end(); i++ ) {
 		if ((*i) == "--server") {
 			server = true;
 		} else if (Ogre::StringUtil::startsWith(*i,"--host=")) {

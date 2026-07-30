@@ -204,6 +204,244 @@ target_link_libraries(hu_ogremax PUBLIC
     OgreOverlay
 )
 
+# --- hu_hikari ---------------------------------------------------------------
+# Hikari, the Flash-in-Ogre GUI library the game's GUI project is built on.
+# Vendored from the upstream Google Code SVN source archive
+# (archive-mirror/hikari-source-archive.zip, LGPL 2.1) into
+# third_party/hikari/{include,source} -- NOT a port of anything under
+# HovercraftUniverse/ (this is a third-party library, owned by this porting
+# effort like third_party/lua, third_party/luabind).
+#
+# The game shipped against a team-patched Hikari (three "Win-Hikari-Update"
+# revisions, archive-mirror/Win-Hikari-Update{,_2,_3}.rar), of which only
+# prebuilt VC9 binaries + patched PUBLIC headers survive
+# (HovercraftUniverse/dependencies/Hikari/{includes,lib} -- read-only,
+# reference only, not linked against here). Diffing those patched headers
+# against upstream's and cross-checking against actual GUI/** call sites
+# (grep for handleInputs/toggleBringToTop/createFlashOverlay's signature)
+# fully identified the patch and it has been reproduced byte-identically at
+# the header level in third_party/hikari/include (see
+# docs/porting/hikari-gui.md for the diff and the matching source-level
+# reconstruction, since no patched .cpp survives to diff against):
+#   - Multi-tier z-ordering removed: FlashControl/ViewportOverlay/
+#     HikariManager::createFlashOverlay's `Ogre::uchar zOrder, Ogre::uchar
+#     tier` collapsed to a single `Ogre::ushort zOrder`.
+#   - FlashControl::setPosition/resetPosition/getCoordinates and
+#     HikariManager::getFocusedControl removed from the public API (dead
+#     weight -- confirmed unused by GUI/**).
+#   - FlashControl::handleInputs(bool)/isHandlingInputs() added (GUI/**
+#     calls handleInputs from BasicOverlay::show/hide).
+#   - HikariManager::toggleBringToTop(bool) added (GUI/GUIManager.cpp calls
+#     it) to let a HUD overlay stay visually on top without the focus code
+#     reshuffling its z-order every frame.
+#
+# Additional MODERN-BUILD-ONLY fixes (not part of the team's patch, needed
+# only to get 2008-era Hikari through v143 + Ogre 14, see
+# docs/porting/hikari-gui.md):
+#   - impl/FlashSite.h, impl/flashhandler.h: `#import
+#     "PROGID:ShockwaveFlash.ShockwaveFlash"` (requires Flash.ocx to be
+#     registered via regsvr32 on the build machine) replaced with a
+#     computed `#import HIKARI_FLASH_OCX_PATH` that loads the typelib
+#     directly out of the Flash.ocx file below -- no system-wide ActiveX
+#     registration performed or required.
+#   - HikariPlatform.h: `_HikariExport` gains a HIKARI_STATIC branch so it's
+#     a no-op when Hikari is built as a static lib (this target), instead
+#     of always dllexport/dllimport (which only made sense for the
+#     original Hikari.dll).
+#   - FlashControl.cpp: two `texture.setNull()` calls -> `texture.reset()`
+#     (Ogre 14's SharedPtr dropped isNull()/setNull()/getPointer(), same
+#     class of break as docs/porting/ogre-api-gap.md's SharedPtr-idiom row).
+#   - FlashControl.{h,cpp}: the `lastDirtyWidth`/`lastDirtyHeight` int
+#     members the team's patch already removed from the public header are
+#     reconstructed as a GetObject()-based bitmap-size query instead (see
+#     source comment), preserving the original DC-rebuild-on-resize
+#     behavior without the removed members.
+#
+# Hikari renders Flash movies into an Ogre::Texture and wraps them in an
+# Ogre::Overlay (Impl::ViewportOverlay, third_party/hikari/include/impl) --
+# needs the Overlay component (OgreOverlay, already required by hu_ogremax/
+# hu_coreengine above) exactly as docs/porting/ogre-api-gap.md's
+# Hikari/Flash-GUI row anticipated.
+set(HU_HIKARI_ROOT ${CMAKE_SOURCE_DIR}/../third_party/hikari)
+
+# Flash.ocx to import the ActiveX typelib from at compile time (see the
+# FlashSite.h/flashhandler.h note above) AND to load at runtime
+# (HikariManager loads "Flash.ocx" next to the executable, falling back to
+# CoCreateInstance-by-registry if that fails -- see Hikari.cpp). Only a
+# real, installed copy of Adobe Flash Player's ActiveX control (32-bit
+# only -- this is the reason this whole modern tree is pinned to Win32/x86,
+# not just Havok/ZoidCom-shim convenience) satisfies either use. The only
+# copy in this repository is local-game/data/Flash.ocx (a real Flash.ocx
+# binary, not vendored/redistributed by this porting effort -- see
+# docs/porting/hikari-gui.md for the redistribution/licensing note).
+set(HU_FLASH_OCX_PATH "${CMAKE_SOURCE_DIR}/../local-game/data/Flash.ocx" CACHE FILEPATH
+    "Path to Flash.ocx, used both to #import its ActiveX typelib at hu_hikari compile time and (at runtime) loaded by HikariManager")
+
+if(NOT EXISTS "${HU_FLASH_OCX_PATH}")
+    message(WARNING "HU_FLASH_OCX_PATH (${HU_FLASH_OCX_PATH}) does not exist -- hu_hikari's #import of the Flash ActiveX typelib will fail to compile. See docs/porting/hikari-gui.md.")
+endif()
+
+find_package(OGRE CONFIG REQUIRED)
+
+add_library(hu_hikari STATIC
+    ${HU_HIKARI_ROOT}/source/FlashControl.cpp
+    ${HU_HIKARI_ROOT}/source/FlashValue.cpp
+    ${HU_HIKARI_ROOT}/source/Hikari.cpp
+    ${HU_HIKARI_ROOT}/source/KeyboardHook.cpp
+    ${HU_HIKARI_ROOT}/source/Position.cpp
+    ${HU_HIKARI_ROOT}/source/RenderBuffer.cpp
+    ${HU_HIKARI_ROOT}/source/ViewportOverlay.cpp
+
+    ${HU_HIKARI_ROOT}/include/Delegate.h
+    ${HU_HIKARI_ROOT}/include/FlashControl.h
+    ${HU_HIKARI_ROOT}/include/FlashValue.h
+    ${HU_HIKARI_ROOT}/include/Hikari.h
+    ${HU_HIKARI_ROOT}/include/HikariPlatform.h
+    ${HU_HIKARI_ROOT}/include/Position.h
+    ${HU_HIKARI_ROOT}/include/impl/FlashSite.h
+    ${HU_HIKARI_ROOT}/include/impl/flashhandler.h
+    ${HU_HIKARI_ROOT}/include/impl/KeyboardHook.h
+    ${HU_HIKARI_ROOT}/include/impl/RenderBuffer.h
+    ${HU_HIKARI_ROOT}/include/impl/ViewportOverlay.h
+)
+
+target_include_directories(hu_hikari PUBLIC
+    ${HU_HIKARI_ROOT}/include
+)
+
+target_compile_definitions(hu_hikari
+    PUBLIC
+        HIKARI_STATIC
+    PRIVATE
+        HIKARI_NONCLIENT_BUILD
+        HIKARI_FLASH_OCX_PATH="${HU_FLASH_OCX_PATH}"
+        WIN32
+        _LIB
+        $<$<CONFIG:Debug>:_DEBUG>
+        $<$<CONFIG:Release>:NDEBUG>
+)
+
+target_link_libraries(hu_hikari PUBLIC
+    OgreMain
+    OgreOverlay
+)
+
+# ole32/oleaut32: COM/OLE (CoCreateInstance, IOleObject, VARIANT/BSTR
+# handling) used throughout FlashControl.cpp/impl/FlashSite.h/
+# impl/flashhandler.h to host the Flash ActiveX control. user32/gdi32: the
+# GetDC/CreateCompatibleDC/CreateDIBSection double-buffering + WM_* message
+# injection in FlashControl.cpp/impl/KeyboardHook.cpp.
+target_link_libraries(hu_hikari PUBLIC
+    ole32
+    oleaut32
+    user32
+    gdi32
+)
+
+# --- hu_gui ------------------------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/GUI/*.cpp/.h -- the
+# faithful VC9 conversion tracked by HovercraftUniverse/GUI/CMakeLists.txt
+# (source list mirrored from there; that file is NOT modified, and per its
+# own comment Test.cpp is deliberately excluded there too). Builds against
+# hu_hikari (the rebuilt Hikari, see above) instead of the original prebuilt
+# dependencies/Hikari, and Ogre 14.5.2's Overlay component.
+set(HU_GUI_ROOT ${HU_ROOT}/GUI)
+
+add_library(hu_gui STATIC
+    ${HU_GUI_ROOT}/GUIManager.cpp
+    ${HU_GUI_ROOT}/MouseVisualisation.cpp
+    ${HU_GUI_ROOT}/OverlayContainer.cpp
+    ${HU_GUI_ROOT}/Resolution.cpp
+    ${HU_GUI_ROOT}/ScalingResolution.cpp
+    ${HU_GUI_ROOT}/BasicOverlay.cpp
+    ${HU_GUI_ROOT}/OverlayManager.cpp
+    ${HU_GUI_ROOT}/Chat.cpp
+    ${HU_GUI_ROOT}/ConnectWindow.cpp
+    ${HU_GUI_ROOT}/Countdown.cpp
+    ${HU_GUI_ROOT}/Direction.cpp
+    ${HU_GUI_ROOT}/LoadingOverlay.cpp
+    ${HU_GUI_ROOT}/LobbyOverlay.cpp
+    ${HU_GUI_ROOT}/MenuButton.cpp
+    ${HU_GUI_ROOT}/NMessageBox.cpp
+    ${HU_GUI_ROOT}/Position.cpp
+    ${HU_GUI_ROOT}/Results.cpp
+    ${HU_GUI_ROOT}/ServerMenu.cpp
+    ${HU_GUI_ROOT}/Speedometer.cpp
+    ${HU_GUI_ROOT}/TimeBehind.cpp
+    ${HU_GUI_ROOT}/Timer.cpp
+    # Test.cpp intentionally excluded -- not part of GUI.vcproj's file list
+    # (see HovercraftUniverse/GUI/CMakeLists.txt's own comment on this)
+
+    ${HU_GUI_ROOT}/GUIManager.h
+    ${HU_GUI_ROOT}/MouseVisualisation.h
+    ${HU_GUI_ROOT}/OverlayContainer.h
+    ${HU_GUI_ROOT}/IResolution.h
+    ${HU_GUI_ROOT}/Resolution.h
+    ${HU_GUI_ROOT}/ScalingResolution.h
+    ${HU_GUI_ROOT}/BasicOverlay.h
+    ${HU_GUI_ROOT}/OverlayManager.h
+    ${HU_GUI_ROOT}/OverlayParameters.h
+    ${HU_GUI_ROOT}/Chat.h
+    ${HU_GUI_ROOT}/ConnectListener.h
+    ${HU_GUI_ROOT}/ConnectWindow.h
+    ${HU_GUI_ROOT}/Countdown.h
+    ${HU_GUI_ROOT}/Direction.h
+    ${HU_GUI_ROOT}/LoadingOverlay.h
+    ${HU_GUI_ROOT}/LobbyOverlay.h
+    ${HU_GUI_ROOT}/MenuButton.h
+    ${HU_GUI_ROOT}/NMessagebox.h
+    ${HU_GUI_ROOT}/Position.h
+    ${HU_GUI_ROOT}/Results.h
+    ${HU_GUI_ROOT}/ServerMenu.h
+    ${HU_GUI_ROOT}/ServerMenuListener.h
+    ${HU_GUI_ROOT}/Speedometer.h
+    ${HU_GUI_ROOT}/TimeBehind.h
+    ${HU_GUI_ROOT}/Timer.h
+)
+
+# OIS 1.6 (vcpkg): see the identical hu_coreengine note below for why the
+# ois/ subdirectory itself (not just its parent) must be on the include path.
+# (hu_gui is wired up before hu_coreengine in this file, so this target
+# resolves HU_OIS_INCLUDE_DIR/HU_OIS_LIBRARY itself rather than relying on
+# hu_coreengine's later find_path/find_library calls -- both are cached
+# find results, so doing this twice is harmless.)
+find_path(HU_OIS_INCLUDE_DIR NAMES OIS.h PATH_SUFFIXES ois)
+find_library(HU_OIS_LIBRARY NAMES OIS)
+
+# GUIManager.h uses boost::signals2::mutex (<boost/signals2/mutex.hpp>) and
+# IResolution.h uses boost::shared_ptr (<boost/shared_ptr.hpp>) -- both
+# genuine, narrow dependency gaps like hu_coreengine's boost-thread/
+# boost-random additions above (boost-signals2 wasn't in the original
+# bootstrap script's vcpkg install list; installed here via
+# `vcpkg install boost-signals2:x86-windows`, boost-smart-ptr for
+# shared_ptr was already installed). scripts/bootstrap-modern-deps.ps1
+# should gain boost-signals2 too (tracked separately, flagged here as with
+# the other ad hoc Boost additions in this file).
+find_package(Boost REQUIRED COMPONENTS signals2)
+
+target_include_directories(hu_gui PUBLIC
+    ${HU_GUI_ROOT}
+    ${HU_OIS_INCLUDE_DIR}
+)
+
+target_compile_definitions(hu_gui PRIVATE
+    WIN32
+    _CONSOLE
+    _MBCS
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+
+target_link_libraries(hu_gui PUBLIC
+    hu_hikari
+    hu_exceptions
+    OgreMain
+    OgreOverlay
+    ${HU_OIS_LIBRARY}
+    Boost::boost
+    Boost::signals2
+)
+
 # --- hu_zoidcom_compat -----------------------------------------------------
 # API-compatible, from-scratch replacement for the dead closed-source
 # ZoidCom networking library (compat/zoidcom/**, owned by this porting
@@ -341,6 +579,32 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/Entity.cpp
     ${HU_COREENGINE_ROOT}/EntityManager.cpp
 
+    # Re-enabled now that hu_gui exists (previously blocked by GUI/Sound
+    # #include taint via <GUIManager.h>/<SoundManager.h> -- hu_sound already
+    # unblocked the Sound half; hu_gui unblocks the rest). See
+    # docs/porting/hikari-gui.md for what did/didn't compile clean.
+    ${HU_COREENGINE_ROOT}/EntityRepresentation.cpp
+    ${HU_COREENGINE_ROOT}/BasicGameState.cpp
+    ${HU_COREENGINE_ROOT}/GameStateManager.cpp
+    ${HU_COREENGINE_ROOT}/RepresentationManager.cpp
+    ${HU_COREENGINE_ROOT}/Application.cpp
+
+    # Also re-enabled: RaceCamera.cpp/.h and GameView.cpp/.h were previously
+    # excluded for a SEPARATE reason from the GUI/Sound taint above -- real
+    # Ogre 1.7->14 Camera API breakage (Ogre::Camera's nodeless positioning
+    # methods only exist when Ogre is built with OGRE_NODELESS_POSITIONING,
+    # which this tree's vcpkg `ogre` port is not). Migrated in place to the
+    # SceneNode-based idiom (operate on the camera's attached parent
+    # SceneNode instead of the camera itself) -- see the detailed comments
+    # in RaceCamera.cpp/.h and docs/porting/hikari-gui.md.
+    ${HU_COREENGINE_ROOT}/RaceCamera.cpp
+    ${HU_COREENGINE_ROOT}/GameView.cpp
+
+    # Also re-enabled: EntityPropertySystem.cpp/.h -- was excluded for a
+    # DIFFERENT, genuine reason (missing #include <iostream>, see the fix
+    # in that file and the comment further down in this list), not GUI/Sound.
+    ${HU_COREENGINE_ROOT}/EntityPropertySystem.cpp
+
     ${HU_COREENGINE_ROOT}/CameraSpring.h
     ${HU_COREENGINE_ROOT}/InputManager.h
     ${HU_COREENGINE_ROOT}/KeyManager.h
@@ -361,6 +625,14 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/EntityManager.h
     ${HU_COREENGINE_ROOT}/FreeroamCameraController.h
     ${HU_COREENGINE_ROOT}/BasicEntityEvent.h
+    ${HU_COREENGINE_ROOT}/GameView.h
+    ${HU_COREENGINE_ROOT}/RaceCamera.h
+    ${HU_COREENGINE_ROOT}/EntityPropertySystem.h
+    ${HU_COREENGINE_ROOT}/EntityRepresentation.h
+    ${HU_COREENGINE_ROOT}/BasicGameState.h
+    ${HU_COREENGINE_ROOT}/GameStateManager.h
+    ${HU_COREENGINE_ROOT}/RepresentationManager.h
+    ${HU_COREENGINE_ROOT}/Application.h
 
     # TODO(modernize): still excluded, but NOT for ZoidCom/Networking reasons
     # anymore -- the shim resolves that taint. Two independent kinds of
@@ -371,46 +643,36 @@ add_library(hu_coreengine STATIC
     #
     #   (A) Pre-existing Ogre API-gap breakage (see docs/porting/ogre-api-gap.md
     #       for the same class of issue elsewhere), independent of this task:
-    #     - RaceCamera.cpp/.h -- calls Ogre::Camera::setPosition/setDirection/
-    #       lookAt/setFixedYawAxis/pitch/yaw/roll/getOrientation/getPosition,
-    #       none of which exist anymore on Ogre::Camera in Ogre 14.5.2 (Camera
-    #       no longer derives from Frustum/MovableObject the same way; those
-    #       calls now go through Camera::getParentSceneNode() or similar).
-    #     - GameView.cpp/.h -- includes RaceCamera.h (same breakage,
-    #       transitively) and additionally calls Ogre::Light::setPosition(),
-    #       also removed/moved in modern Ogre.
-    #     - EntityPropertySystem.cpp/.h -- includes <zoidcom/zoidcom.h>, which
-    #       now resolves fine, but EntityPropertySystem.cpp itself uses
-    #       std::cout (lines ~239/252/262) without #include <iostream> --
-    #       a latent, pre-existing bug in this file, unrelated to ZoidCom.
+    #       RaceCamera.cpp/.h and GameView.cpp/.h have SINCE been fixed and
+    #       re-enabled above (see the comments there) -- both
+    #       Ogre::Camera's and Ogre::Light's nodeless positioning methods
+    #       (setPosition/setDirection/lookAt/setFixedYawAxis/pitch/yaw/roll/
+    #       getOrientation/getPosition) only exist when Ogre itself is built
+    #       with OGRE_NODELESS_POSITIONING, which this tree's vcpkg `ogre`
+    #       port is not; both were migrated to operate on/via a SceneNode
+    #       instead. What remains here:
+    #     - EntityPropertySystem.cpp/.h have SINCE been fixed and re-enabled
+    #       above too (missing `#include <iostream>` for its std::cout
+    #       calls -- see the comment there; its <zoidcom/zoidcom.h> #include
+    #       already resolved fine, that was never the actual blocker).
+    #       Discovered because linking the HovercraftUniverse exe target
+    #       (see that target below) surfaced unresolved
+    #       EntityPropertyMap/EntityProperty/EntityPropertyFactory/
+    #       EntityPropertyMapReplicator symbols referenced from
+    #       hu_coreengine's Entity.cpp and hu_game_physics's
+    #       BoostAction/BoostProperty/SpeedBoost/HovercraftAIController.
     #
-    #   (B) Still GUI/Sound-tainted (unchanged from before this task):
-    #     - EntityRepresentation.cpp/.h -- includes Entity.h (no longer
-    #       tainted) but EntityRepresentation.cpp ALSO directly #includes
-    #       "Application.h", which pulls in <GUIManager.h>/<SoundManager.h>
-    #       (GUI, Sound projects, not yet ported).
-    #     - BasicGameState.cpp/.h -- includes <GUIManager.h> and <SoundManager.h> directly.
-    #     - GameStateManager.cpp -- #includes "BasicGameState.h" in full (GUI/Sound
-    #       taint above). GameStateManager.h itself only forward-declares
-    #       BasicGameState and has no other blocker, but its .cpp cannot build
-    #       without BasicGameState's full definition.
-    #     - RepresentationManager.cpp/.h -- includes EntityManager.h/
-    #       EntityRepresentation.h/GameView.h (still tainted per (A)/(B) above)
-    #       AND <GUIManager.h>/<SoundManager.h> directly (GUI, Sound, not yet ported).
-    #     - Application.cpp/.h -- includes EntityManager.h/RepresentationManager.h
-    #       (RepresentationManager still tainted) and <GUIManager.h>/
-    #       <SoundManager.h> directly (GUI, Sound, not yet ported).
+    #   (B) Formerly GUI/Sound-tainted -- ALL fixed and re-enabled above now
+    #       that hu_gui/hu_sound exist: EntityRepresentation.cpp/.h,
+    #       BasicGameState.cpp/.h, GameStateManager.cpp/.h,
+    #       RepresentationManager.cpp/.h, Application.cpp/.h. See the
+    #       comments up in the main source list above for what each needed
+    #       (mostly just the new include dirs/link libs added to this
+    #       target below; Application.cpp additionally needed the
+    #       showConfigDialog/ST_GENERIC Ogre-API-gap fixes noted there).
     #
     # Inert (header-only, no matching .cpp in CoreEngine.vcproj, kept for
     # source-list parity even though nothing here #includes them):
-    ${HU_COREENGINE_ROOT}/EntityPropertySystem.h
-    ${HU_COREENGINE_ROOT}/EntityRepresentation.h
-    ${HU_COREENGINE_ROOT}/GameView.h
-    ${HU_COREENGINE_ROOT}/RaceCamera.h
-    ${HU_COREENGINE_ROOT}/GameStateManager.h
-    ${HU_COREENGINE_ROOT}/RepresentationManager.h
-    ${HU_COREENGINE_ROOT}/Application.h
-    ${HU_COREENGINE_ROOT}/BasicGameState.h
     # NOTE: MenuView.h is listed for parity but has a real latent bug inherited
     # from the original source: it reuses BasicView.h's include guard
     # (`#define _BASICVIEW_H`), a copy-paste mistake. If anything ever
@@ -438,6 +700,10 @@ find_package(Boost REQUIRED COMPONENTS thread)
 target_include_directories(hu_coreengine PUBLIC
     ${HU_COREENGINE_ROOT}
     ${HU_OIS_INCLUDE_DIR}
+    ${HU_ROOT}/GUI
+    ${HU_ROOT}/Sound
+    ${HU_OGREMAX_ROOT}
+    ${HU_OGREMAX_ROOT}/tinyxml
 )
 
 target_compile_definitions(hu_coreengine PRIVATE
@@ -445,6 +711,19 @@ target_compile_definitions(hu_coreengine PRIVATE
     _LIB
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
+    # RepresentationManager.h (re-enabled above, now that hu_gui exists) has
+    # a pre-existing `using namespace std;` at header/global scope -- a bad
+    # habit that was harmless in 2010 but, now that this file's #include
+    # chain also reaches GUIManager.h/Hikari.h's <windows.h>/COM headers
+    # (objidl.h etc, which declare a global `typedef unsigned char byte;`)
+    # in the same translation unit, collides with C++17's `std::byte`
+    # (pulled unqualified into scope by the `using namespace std;`) --
+    # "'byte': ambiguous symbol". _HAS_STD_BYTE=0 is the standard MS-STL
+    # escape hatch for exactly this legacy-code-plus-Windows-SDK collision
+    # (undefines std::byte instead of requiring every legacy `using
+    # namespace std;` header to be untangled). Not a team patch, not a
+    # functionality change -- see docs/porting/hikari-gui.md.
+    _HAS_STD_BYTE=0
 )
 # NOTE: deliberately NOT defining UNICODE/_UNICODE here (unlike the VC9
 # CoreEngine.vcproj / HovercraftUniverse/CoreEngine/CMakeLists.txt, which do).
@@ -464,6 +743,9 @@ target_link_libraries(hu_coreengine PUBLIC
     hu_exceptions
     hu_networking
     hu_zoidcom_compat
+    hu_gui
+    hu_sound
+    hu_ogremax
     Boost::thread
 )
 
@@ -621,6 +903,7 @@ add_library(hu_game_physics STATIC
     ${HU_GAMEPHYSICS_ROOT}/PlanetGravityPhantom.cpp
     ${HU_GAMEPHYSICS_ROOT}/PlayerSettings.cpp
     ${HU_GAMEPHYSICS_ROOT}/PlayerSettingsInterceptor.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Portal.cpp
     ${HU_GAMEPHYSICS_ROOT}/PortalPhantom.cpp
     ${HU_GAMEPHYSICS_ROOT}/PortalRepresentation.cpp
     ${HU_GAMEPHYSICS_ROOT}/PowerupPhantom.cpp
@@ -658,29 +941,42 @@ add_library(hu_game_physics STATIC
     ${HU_GAMEPHYSICS_ROOT}/PathRecorder.cpp
     ${HU_GAMEPHYSICS_ROOT}/HUServerThread.cpp
 
-    # EXCLUDED (A) -- transitively #include GUIManager.h / SoundManager.h /
-    # Scripting (lua.h, luabind.hpp, OgreLuaBindings.h), none of which are
-    # ported yet. Left on disk untouched; re-add once their blocking
-    # project is ported:
-    #   ClientPreparationLoader.cpp  -- GUI, Sound
-    #   HUApplication.cpp            -- GUI, Sound
-    #   HUClient.cpp                 -- GUI, Sound, Scripting
-    #   HUD.cpp                      -- GUI
-    #   HovercraftRepresentation.cpp -- GUI, Sound
-    #   InGameState.cpp              -- GUI, Sound
-    #   LobbyGUI.cpp                 -- GUI
-    #   LobbyState.cpp               -- GUI, Sound
-    #   MainMenu.cpp                 -- GUI
-    #   MainMenuState.cpp            -- GUI, Sound
-    #   main.cpp                     -- GUI, Sound (WinMain entry point itself)
-    #   ClientConnectThread.cpp      -- ClientConnectThread.h #includes
-    #                                    "ConnectListener.h", which only
-    #                                    exists under HovercraftUniverse/GUI/
-    #                                    (GUI project, not ported); also
-    #                                    missed by the taint scan above
-    #                                    because ConnectListener.h itself
-    #                                    doesn't happen to #include
-    #                                    GUIManager.h/SoundManager.h.
+    # Re-enabled now that hu_gui exists (previously EXCLUDED (A): transitively
+    # #include GUIManager.h/SoundManager.h/Scripting headers; hu_sound/
+    # hu_scripting already unblocked the Sound/Scripting half of the taint,
+    # hu_gui unblocks the rest). See docs/porting/hikari-gui.md.
+    # main.cpp is deliberately NOT re-added here -- it's the WinMain entry
+    # point and belongs to the HovercraftUniverse exe target instead (see
+    # that target below), not this static lib.
+    ${HU_GAMEPHYSICS_ROOT}/ClientPreparationLoader.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUApplication.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUClient.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUD.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/LobbyGUI.cpp
+    ${HU_GAMEPHYSICS_ROOT}/MainMenu.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ClientConnectThread.cpp
+
+    # NEWLY DISCOVERED excluded files (not GUI/Sound/Scripting-tainted --
+    # a DIFFERENT, genuine missing dependency found while re-enabling this
+    # set): InGameState.cpp/.h #include <SkyX.h> and use the SkyX::SkyX sky
+    # rendering plugin class directly. SkyX is a real, separate third-party
+    # Ogre add-on (headers survive at HovercraftUniverse/dependencies/SkyX,
+    # source archive at archive-mirror/SkyX_0_1.rar per RUNNING.md's
+    # inventory) that has never been vendored/built anywhere in this modern
+    # tree -- it is not part of Hikari/GUI and vendoring+porting it is a
+    # separate task of the same shape as hu_hikari above, out of scope here.
+    # Left on disk untouched; re-add once SkyX has its own hu_skyx target.
+    #   InGameState.cpp     -- SkyX (not GUI/Sound; those taints are resolved)
+    #   MainMenuState.cpp   -- #includes "InGameState.h" directly (to
+    #                          transition into it), so it's blocked by the
+    #                          exact same missing SkyX.h transitively, even
+    #                          though MainMenuState.cpp itself never
+    #                          mentions SkyX.
+    #   LobbyState.cpp      -- same as MainMenuState.cpp, but ALSO directly
+    #                          instantiates `new InGameState(...)` (not just
+    #                          an #include), so it needs InGameState's full
+    #                          definition, not just its declaration.
     #
     # EXCLUDED (B) -- NOT GUI/Sound/Scripting-tainted; each blocked by its
     # own genuine, pre-existing, non-Havok bug in HovercraftUniverse/**
@@ -694,12 +990,17 @@ add_library(hu_game_physics STATIC
     #                       with no matching header -- the header was
     #                       apparently never committed, or removed without
     #                       removing the .cpp).
-    #   Portal.cpp      -- calls the Ogre 1.x `Ogre::vector<Ogre::String>::type`
-    #                       + `Ogre::StringUtil::split()` idiom, both removed
-    #                       in Ogre 14.5.2 -- an ogre-api-gap issue (same
-    #                       class as docs/porting/ogre-api-gap.md), just not
-    #                       caught by that document's original pass because
-    #                       this file was Havok-blocked at the time.
+    #   Portal.cpp -- FIXED and re-enabled above: called the Ogre 1.x
+    #                 `Ogre::vector<Ogre::String>::type` + `Ogre::StringUtil::split()`
+    #                 idiom (same class as docs/porting/ogre-api-gap.md's row 1,
+    #                 just not caught by that document's original pass
+    #                 because this file was Havok-blocked at the time);
+    #                 replaced with `std::vector<Ogre::String>` (2 call
+    #                 sites). Discovered/confirmed necessary because linking
+    #                 the HovercraftUniverse exe target (see that target
+    #                 below) surfaced unresolved Portal::Portal/onEnter/
+    #                 onLeave/load/getClassName symbols referenced from
+    #                 EntityRegister.cpp, PortalPhantom.cpp, ServerLoader.cpp.
     #
     # (PathRecorder.cpp/HUServerThread.cpp were also excluded here for
     # boost::xtime/boost::TIME_UTC breakage -- fixed in place, see above;
@@ -744,6 +1045,9 @@ target_include_directories(hu_game_physics PUBLIC
     ${HU_OGREMAX_ROOT}
     ${HU_ROOT}/Utils
     ${HU_OIS_INCLUDE_DIR}
+    ${HU_ROOT}/GUI
+    ${HU_ROOT}/Sound
+    ${HU_ROOT}/Scripting
 )
 
 target_compile_definitions(hu_game_physics PRIVATE
@@ -751,6 +1055,10 @@ target_compile_definitions(hu_game_physics PRIVATE
     _LIB
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
+    # See hu_coreengine's identical note above -- the same
+    # using-namespace-std-plus-COM-headers `byte` ambiguity resurfaces here
+    # now that GUI-tainted files (HUD.cpp etc) pull in GUIManager.h/Hikari.h.
+    _HAS_STD_BYTE=0
 )
 # Deliberately NOT defining UNICODE/_UNICODE -- same reasoning as
 # hu_ogremax/hu_coreengine above (this project's real .vcproj does define
@@ -810,6 +1118,7 @@ target_link_libraries(hu_game_physics PUBLIC
     hu_exceptions
     hu_sound
     hu_scripting
+    hu_gui
     OgreMain
     OgreOverlay
     Boost::thread
@@ -818,4 +1127,55 @@ target_link_libraries(hu_game_physics PUBLIC
     # timing loop (see docs/porting/timing-and-smoothing.md) to raise Windows
     # timer granularity so Sleep() is accurate enough for a 60 Hz+ physics tick.
     winmm
+)
+
+# --- HovercraftUniverse (exe) ------------------------------------------------
+# WIN32-subsystem executable, WinMain entry point, mirroring the faithful
+# VC9 project's structure (HovercraftUniverse/HovercraftUniverse/main.cpp +
+# HovercraftUniverse.vcproj's own AdditionalDependencies linking OgreMax,
+# GUI, Sound, Exceptions, Scripting, Utils, CoreEngine, Networking, plus the
+# prebuilt third-party import libs) -- see that project's own untouched
+# CMakeLists.txt for the full faithful accounting. In this modern tree,
+# hu_game_physics already PUBLIC-links every one of those (hu_coreengine,
+# hu_networking, hu_ogremax, hu_gui, hu_sound, hu_scripting, hu_utils,
+# hu_exceptions, hu_zoidcom_compat, hu_havok_compat, OgreMain, OgreOverlay),
+# so main.cpp only needs to be compiled and linked against that one target.
+# main.cpp itself needed two in-place fixes (see
+# docs/porting/hikari-gui.md): the `Ogre::vector<Ogre::String>::type` /
+# `Ogre::StringUtil::split` idiom (removed in Ogre 14, same class of issue
+# as docs/porting/ogre-api-gap.md's row 1) and an explicit
+# `#include <zoidcom/zoidcom.h>` (ZoidCom's declaration was previously only
+# ever reached transitively via the VC9 project's precompiled-header
+# chain).
+add_executable(HovercraftUniverse WIN32
+    ${HU_GAMEPHYSICS_ROOT}/main.cpp
+)
+
+target_compile_definitions(HovercraftUniverse PRIVATE
+    WIN32
+    _WINDOWS
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+    # See hu_game_physics's identical note above (using-namespace-std +
+    # COM-headers `byte` ambiguity).
+    _HAS_STD_BYTE=0
+)
+# Deliberately NOT defining UNICODE/_UNICODE -- same reasoning as
+# hu_coreengine/hu_game_physics above (the VC9 .vcproj does define it, but
+# main.cpp's dependency closure includes narrow-buffer Win32 API calls that
+# are not actually Unicode-clean).
+
+if(MSVC)
+    # See hu_game_physics's identical settings above for why: PlayerMapImpl.h
+    # (permissive two-phase-lookup relaxation) and Havok.h/HavokThread.h
+    # (missing <windows.h> before DWORD/WINAPI/LPVOID) are both reachable
+    # from main.cpp's #include closure.
+    target_compile_options(HovercraftUniverse PRIVATE /permissive /FI windows.h)
+endif()
+
+target_link_libraries(HovercraftUniverse PRIVATE
+    hu_game_physics
+    OgreMain
+    OgreOverlay
+    OgreBites
 )

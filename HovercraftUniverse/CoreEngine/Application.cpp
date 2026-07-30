@@ -5,6 +5,11 @@
 #include "Config.h"
 #include "OgreWindowListener.h"
 #include "EntityMapping.h"
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Root::showConfigDialog()
+// now requires an Ogre::ConfigDialog* (the old no-argument, built-in native
+// dialog overload is gone); OgreBites (already linked by hu_coreengine)
+// ships a drop-in native dialog via getNativeConfigDialog().
+#include <OgreBitesConfigDialog.h>
 
 namespace HovUni {
 Ogre::SceneManager* Application::msSceneMgr = 0;
@@ -108,7 +113,7 @@ void Application::defineResources() {
 }
 
 void Application::setupRenderSystem() {
-	if (!mOgreRoot->restoreConfig() && !mOgreRoot->showConfigDialog()) {
+	if (!mOgreRoot->restoreConfig() && !mOgreRoot->showConfigDialog(OgreBites::getNativeConfigDialog())) {
 		// TODO Throw exception
 	}
 }
@@ -139,7 +144,10 @@ void Application::createClient(const Ogre::String& host, unsigned int port){
 
 void Application::setupScene() {
 	// Create scene manager
-	msSceneMgr = mOgreRoot->createSceneManager(Ogre::ST_GENERIC, "Default");
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Ogre::ST_GENERIC / the
+	// SceneType-enum overload of createSceneManager no longer exists --
+	// modern Ogre selects a scene manager by its (string) factory type name.
+	msSceneMgr = mOgreRoot->createSceneManager("DefaultSceneManager", "Default");
 	msSceneMgr->setShadowTechnique(Ogre::SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED);
 
 	// Get created window

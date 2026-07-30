@@ -2,6 +2,12 @@
 #define MOUSEVISUALISATION_H
 
 #include <Ogre.h>
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Overlay/OverlayManager/
+// OverlayContainer/PanelOverlayElement all moved into the separate Overlay
+// component in modern Ogre (no longer transitively pulled in by "Ogre.h").
+#include <OgreOverlay.h>
+#include <OgreOverlayManager.h>
+#include <OgreOverlayContainer.h>
 #include <OgrePanelOverlayElement.h>
 
 namespace HovUni {

@@ -28,7 +28,7 @@ namespace HovUni {
 			 *
 			 * @param boost The value to set the boost meter to [0 - 100]
 			 */
-			void Speedometer::setBoost(Ogre::Real boost);
+			void setBoost(Ogre::Real boost);
 
 			/**
 			 * Gently move to a new speed setting with a given step size

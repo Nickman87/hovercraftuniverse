@@ -2,6 +2,12 @@
 #include "Entity.h"
 
 #include <list>
+// Pre-existing bug fix (not Ogre/modernization-related, see
+// docs/porting/hikari-gui.md): this file calls std::cout/std::endl (see
+// below) without ever including <iostream> -- apparently only ever built
+// successfully because some other header earlier in the VC9 project's
+// precompiled-header chain happened to pull it in first.
+#include <iostream>
 
 namespace HovUni {
 
