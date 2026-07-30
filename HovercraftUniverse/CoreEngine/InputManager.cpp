@@ -73,9 +73,12 @@ void InputManager::initialise(Ogre::RenderWindow * renderWindow) {
 			mMouse->setEventCallback(this);
 
 			// Get window size
-			unsigned int width, height, depth;
+			// TODO(modernize): Ogre 14's RenderWindow::getMetrics() dropped the
+			// `depth` out-parameter (window color depth isn't tracked per-window
+			// any more); signature is now (width, height, left, top).
+			unsigned int width, height;
 			int left, top;
-			renderWindow->getMetrics(width, height, depth, left, top);
+			renderWindow->getMetrics(width, height, left, top);
 
 			// Set mouse region
 			this->setWindowExtents(width, height);

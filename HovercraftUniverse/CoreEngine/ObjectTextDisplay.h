@@ -3,6 +3,12 @@
 
 #include <OgreMovableObject.h>
 #include <OgreCamera.h>
+#include <OgreAxisAlignedBox.h>
+// TODO(modernize): Ogre 14's Overlay component split OgreOverlay.h out from
+// OgreOverlayManager.h (the latter used to pull in Ogre::Overlay
+// transitively). Include it explicitly so Ogre::Overlay is a complete type
+// here (needed for the m_pOverlay member below).
+#include <Overlay/OgreOverlay.h>
 #include <OgreOverlayManager.h>
 #include <OgreOverlayContainer.h>
 #include <OgreOverlayElement.h>

@@ -5,6 +5,11 @@
 #include <OgreCamera.h>
 #include <OgreSceneManager.h>
 #include <OgreRenderWindow.h>
+// TODO(modernize): Ogre 14 headers are leaner than 1.7 -- OgreRenderWindow.h
+// no longer pulls in Ogre::Viewport transitively. Needed explicitly here for
+// mViewport below and for BasicView.cpp's use of Viewport::getZOrder()/
+// getActualWidth()/getActualHeight().
+#include <OgreViewport.h>
 
 namespace HovUni {
 
