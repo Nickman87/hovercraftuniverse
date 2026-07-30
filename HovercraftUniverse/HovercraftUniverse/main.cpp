@@ -35,6 +35,12 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 	// already-running dedicated server with no GUI interaction. Without this
 	// flag on the command line, behaviour is unchanged.
 	bool autoConnect = false;
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autostart implies --autoconnect and additionally starts the race
+	// (as if the admin had clicked "Start") once the client reaches the
+	// lobby and is recognised as admin. Without this flag, behaviour is
+	// unchanged.
+	bool autoStart = false;
 	//parse all commandline parameters (seperated by spaces)
 	Ogre::String commandline (strCmdLine);
 	// Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): the
@@ -58,6 +64,9 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 			console = true;
 		} else if ((*i) == "--autoconnect") {
 			autoConnect = true;
+		} else if ((*i) == "--autostart") {
+			autoConnect = true;
+			autoStart = true;
 		}
 	}
 
@@ -87,7 +96,7 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 		
 		try {
 			app.init();
-			app.go(host,port,autoConnect);
+			app.go(host,port,autoConnect,autoStart);
 		} catch (Ogre::Exception & e) {
 			MessageBox(NULL, e.getFullDescription().c_str(), "An exception has occurred!", MB_OK | MB_ICONERROR | MB_TASKMODAL);
 		} catch (HovUni::Exception e2) {

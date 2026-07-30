@@ -27,6 +27,15 @@
 //     setOwner() synchronously, right after registration, in the same
 //     constructor (e.g. PlayerSettings, Lobby::onConnect), before any
 //     ZCom_processOutput() tick has run.
+//     Registration-order-independence follow-up: setOwner() also now
+//     unconditionally records the requested role in a per-connection
+//     pending_owner_intent map on the node, regardless of this node's
+//     current role or whether the connection is linked yet.
+//     ZCom_shimQueueAnnounce() consults that map whenever it creates a
+//     LinkedConn entry, so a setOwner() call made *before* registerNodeDynamic()
+//     / networkRegister() (e.g. ServerLoader.cpp's Hovercraft, which sets
+//     ownership before calling networkRegister()) is not silently dropped
+//     just because this node wasn't the authority yet at call time.
 //   - The node event queue (checkEventWaiting()/getNextEvent()) is a real
 //     per-node FIFO now. sendEvent()/sendEventDirect()/sendEventToGroup()
 //     deliver via NODE_EVENT, filtered by replication rule for sendEvent().
@@ -198,6 +207,16 @@ public:
     // Authority-side: connections queued for the deferred announcement flush
     // (see ZCom_shimFlushPendingAnnouncements()).
     std::vector<ZCom_ConnID> pending_announce;
+
+    // setOwner() intent recorded per connection, independent of this node's
+    // current role/registration/link state -- see setOwner()'s comment and
+    // ZCom_shimQueueAnnounce() below. The game routinely calls setOwner()
+    // before this node is even registered (e.g. ServerLoader.cpp sets the
+    // controlling player's ownership on a freshly-created Hovercraft's node
+    // before networkRegister() has run at all), so the role/link-based gate
+    // that used to live in setOwner() must not be the only place this is
+    // remembered.
+    std::map<ZCom_ConnID, bool> pending_owner_intent;
 
     // Proxy/owner-side: the connection this node's authority lives on.
     ZCom_ConnID authority_conn;
@@ -455,14 +474,39 @@ void ZCom_Node::setOwner(ZCom_ConnID _id, bool _enabled) {
     // "won't do anything special on its own" beyond changing the role the
     // remote connection's counterpart node observes -- see
     // zoidcom-original-semantics.md §6.
+    //
+    // Registration-order fix: record the intent for _id unconditionally,
+    // regardless of whether this node is (yet) the authority or _id is (yet)
+    // linked. The game calls setOwner() in three shapes we've observed:
+    //   1. Authority + already-linked connection (RaceState.cpp, Lobby.cpp
+    //      admin promotion) -- handled below exactly as before.
+    //   2. Authority + not-yet-linked connection, i.e. still queued in
+    //      pending_announce (PlayerSettings, Lobby::onConnect) -- also
+    //      handled below via pending_announce/ZCom_shimFlushPendingAnnouncements.
+    //   3. Not yet even registered as authority at all (ServerLoader.cpp
+    //      calls setOwner() on a Hovercraft's node before networkRegister()
+    //      has run; ChatServer.cpp calls it against a node registered with
+    //      announce=false whose connections are queued lazily). Real ZoidCom
+    //      shipped against this exact pattern in 2010, so it must have
+    //      remembered the intent and applied it once knowable -- our old
+    //      early-out here just silently dropped it (see
+    //      docs/porting/phase-b-replication.md §6.1). ZCom_shimQueueAnnounce()
+    //      consults this map whenever a LinkedConn entry for _id is created,
+    //      whenever that ends up happening.
+    m_priv->pending_owner_intent[_id] = _enabled;
+
     if (m_priv->role != eZCom_RoleAuthority) {
-        zshim::todoPhaseBOnce("ZCom_Node::setOwner(non-authority)",
-            "setOwner() only has an effect when called on the authority node; called on a non-authority node");
+        // Not (yet) the authority -- nothing more to do until/unless this
+        // node registers as authority and _id becomes linked (case 3 above).
+        // If that never happens, this is a legitimate no-op, matching real
+        // semantics ("only has an effect ... on the authority node").
         return;
     }
     std::map<ZCom_ConnID, LinkedConn>::iterator it = m_priv->linked_conns.find(_id);
     if (it == m_priv->linked_conns.end()) {
-        // _id isn't (yet) relevant to this node -- legitimate no-op.
+        // _id isn't (yet) relevant to this node -- legitimate no-op; the
+        // intent above will be picked up if/when it becomes relevant via
+        // ZCom_shimQueueAnnounce().
         return;
     }
     eZCom_NodeRole oldrole = it->second.role;
@@ -730,6 +774,17 @@ void ZCom_Node::ZCom_shimQueueAnnounce(ZCom_ConnID _conn) {
     LinkedConn entry;
     entry.role = eZCom_RoleProxy;
     entry.announced = false;
+    // Apply any setOwner() intent already recorded for _conn -- see
+    // setOwner()'s comment. This is what makes setOwner() registration-order
+    // independent: it may have been called long before this connection ever
+    // became linked (e.g. ServerLoader.cpp's Hovercraft, whose setOwner()
+    // call happens before networkRegister()/setAnnounceData() even runs the
+    // loop that reaches this function), and the queued NODE_CREATE must
+    // still carry the correct is_owner.
+    std::map<ZCom_ConnID, bool>::const_iterator owner_it = m_priv->pending_owner_intent.find(_conn);
+    if (owner_it != m_priv->pending_owner_intent.end()) {
+        entry.role = owner_it->second ? eZCom_RoleOwner : eZCom_RoleProxy;
+    }
     m_priv->linked_conns[_conn] = entry;
     m_priv->pending_announce.push_back(_conn);
     if (m_priv->control) m_priv->control->ZCom_shimNotePendingFlush(this);

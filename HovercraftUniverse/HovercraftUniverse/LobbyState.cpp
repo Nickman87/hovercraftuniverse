@@ -8,7 +8,7 @@
 #include <OgreRoot.h>
 
 namespace HovUni {
-	LobbyState::LobbyState(HUClient* client) : mClient(client), mLobby(client->getLobby()), mLastGUIUpdate(0), mLastClientUpdate(0) {
+	LobbyState::LobbyState(HUClient* client) : mClient(client), mLobby(client->getLobby()), mLastGUIUpdate(0), mLastClientUpdate(0), mAutoStartTriggered(false), mAutoStartWaitLogged(false) {
 		mGUIManager = GUIManager::getSingletonPtr();
 		mLobbyGUI = new LobbyGUI(Hikari::FlashDelegate(this, &LobbyState::hovercraftChange), Hikari::FlashDelegate(this, &LobbyState::mapChange), Hikari::FlashDelegate(this, &LobbyState::onChat), Hikari::FlashDelegate(this, &LobbyState::onPressStart), Hikari::FlashDelegate(this, &LobbyState::onPressLeave), Hikari::FlashDelegate(this, &LobbyState::botsValue), Hikari::FlashDelegate(this, &LobbyState::playerMax));
 	}
@@ -236,6 +236,32 @@ namespace HovUni {
 
 	bool LobbyState::frameStarted(const Ogre::FrameEvent & evt) {
 		bool result = true;
+
+		// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+		// --autostart lets a two-process test harness start the race itself
+		// once it reaches the lobby, with no GUI interaction. Admin status
+		// arrives over the network (it's granted by the server once our
+		// PlayerSettings/Lobby node has linked, see Lobby.cpp), so this polls
+		// isAdmin() every tick rather than giving up after the first one.
+		// Reuses the exact same mLobby->start() call as onPressStart() (the
+		// "Start" button) above. Without --autostart,
+		// Application::getAutoStart() is false and this whole block is a
+		// no-op: behaviour is unchanged from before this affordance existed.
+		if (!mAutoStartTriggered && Application::getAutoStart()) {
+			if (mLobby->isAdmin()) {
+				mAutoStartTriggered = true;
+
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[Autostart]: starting race as admin";
+
+				mLobby->start();
+			} else if (!mAutoStartWaitLogged) {
+				mAutoStartWaitLogged = true;
+
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[Autostart]: waiting on admin status before starting the race";
+			}
+		}
 
 		mLastGUIUpdate += evt.timeSinceLastFrame;
 		mLastClientUpdate += evt.timeSinceLastFrame;

@@ -20,6 +20,7 @@ Config* Application::mConfig = 0;
 Ogre::String Application::msAutoConnectHost = "";
 unsigned int Application::msAutoConnectPort = 0;
 bool Application::msAutoConnect = false;
+bool Application::msAutoStart = false;
 
 Application::Application(Ogre::String appName, Ogre::String configINI) : mAppName(appName), mConfigINI(configINI) {
 	// All was initialized
@@ -48,7 +49,7 @@ void Application::init() {
 	setupInputSystem();
 }
 
-void Application::go(const Ogre::String& host, unsigned int port, bool autoConnect) {
+void Application::go(const Ogre::String& host, unsigned int port, bool autoConnect, bool autoStart) {
 	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): stash
 	// the --autoconnect target so MainMenuState can trigger the production
 	// onConnect() path itself once the menu state is ticking, without any
@@ -58,6 +59,7 @@ void Application::go(const Ogre::String& host, unsigned int port, bool autoConne
 	msAutoConnectHost = host;
 	msAutoConnectPort = port;
 	msAutoConnect = autoConnect;
+	msAutoStart = autoStart;
 
 	setupScene();
 	createClient(host,port);

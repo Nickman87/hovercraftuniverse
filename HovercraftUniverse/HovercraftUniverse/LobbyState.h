@@ -45,6 +45,16 @@ namespace HovUni {
 			/** The ID's of users that have not yet been registered with the gui */
 			std::vector<unsigned int> mDelayedUsers;
 
+			/** Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+			 * whether the --autostart start-the-race call has already fired.
+			 * Not original behaviour. */
+			bool mAutoStartTriggered;
+
+			/** Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+			 * whether we've already logged that --autostart is waiting on
+			 * admin status. Not original behaviour. */
+			bool mAutoStartWaitLogged;
+
 		public:
 			/**
 			 * Constructor

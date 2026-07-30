@@ -104,6 +104,14 @@ protected:
 	static unsigned int msAutoConnectPort;
 	static bool msAutoConnect;
 
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autostart implies --autoconnect and additionally has LobbyState fire
+	// mLobby->start() itself once the client is recognised as admin, so a
+	// test harness can drive a race past the lobby with no GUI interaction.
+	// Not original behaviour -- with no --autostart flag, msAutoStart stays
+	// false and nothing changes.
+	static bool msAutoStart;
+
 public:
 
 	/**
@@ -142,17 +150,23 @@ public:
 	 *        when true, the menu state connects to host:port itself on its
 	 *        first tick instead of waiting for a GUI click. Defaults to
 	 *        false, i.e. unchanged original behaviour.
+	 * @param autoStart test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	 *        when true (implies autoConnect), LobbyState fires
+	 *        mLobby->start() itself once we're recognised as admin in the
+	 *        lobby. Defaults to false, i.e. unchanged original behaviour.
 	 */
-	void go(const Ogre::String& host, unsigned int port, bool autoConnect = false);
+	void go(const Ogre::String& host, unsigned int port, bool autoConnect = false, bool autoStart = false);
 
 	/**
 	 * Test affordance (revival Phase B, docs/porting/phase-b-plan.md): read
-	 * back the host/port/autoConnect that were passed to go(), so a game
-	 * state can drive an auto-connect without any GUI interaction.
+	 * back the host/port/autoConnect/autoStart that were passed to go(), so a
+	 * game state can drive an auto-connect/auto-start without any GUI
+	 * interaction.
 	 */
 	static const Ogre::String& getAutoConnectHost() { return msAutoConnectHost; }
 	static unsigned int getAutoConnectPort() { return msAutoConnectPort; }
 	static bool getAutoConnect() { return msAutoConnect; }
+	static bool getAutoStart() { return msAutoStart; }
 
 	/**
 	 * Creates the client.
