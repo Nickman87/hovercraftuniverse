@@ -466,3 +466,248 @@ target_link_libraries(hu_coreengine PUBLIC
     hu_zoidcom_compat
     Boost::thread
 )
+
+# --- hu_havok_compat -----------------------------------------------------
+# API-compatible, from-scratch replacement for the dead closed-source Havok
+# Physics 6.6 SDK (compat/havok/**, owned by this porting effort -- not a
+# port of anything under HovercraftUniverse/), backed by Bullet 3.25
+# (vcpkg). See docs/porting/havok-compat.md.
+add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/havok ${CMAKE_BINARY_DIR}/compat_havok)
+
+# --- hu_game_physics -------------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/HovercraftUniverse/*
+# -- the game-logic project (HovercraftUniverse.vcproj / that directory's
+# own, untouched CMakeLists.txt). This target builds the subset of its 91
+# .cpp files that do not need the not-yet-ported GUI (Hikari), Sound (FMOD)
+# or Scripting (Lua/LuaBind) projects, against hu_havok_compat instead of
+# the real (dead, VC9-only) Havok prebuilt libs.
+#
+# The clean/tainted split below was produced by a transitive #include-taint
+# analysis (same method as hu_coreengine's ZoidCom/Networking split above):
+# starting from each .cpp (and its matching .h), recursively follow local
+# quoted #includes and flag any file whose closure reaches GUIManager.h,
+# SoundManager.h, or a Scripting header (lua.h/luabind.hpp/
+# OgreLuaBindings.h). 78 of 91 files are clean by that measure; see the
+# EXCLUDED list at the bottom of this target for the other 13 and exactly
+# what blocks each one. Every excluded file still exists on disk, untouched,
+# ready to be re-added once its blocking project is ported -- nothing here
+# silently drops functionality.
+set(HU_GAMEPHYSICS_ROOT ${HU_ROOT}/HovercraftUniverse)
+
+add_library(hu_game_physics STATIC
+    ${HU_GAMEPHYSICS_ROOT}/AbstractHavokWorld.cpp
+    ${HU_GAMEPHYSICS_ROOT}/AdvancedCollisionPrevention.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Asteroid.cpp
+    ${HU_GAMEPHYSICS_ROOT}/AsteroidRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/BasePhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/BoostAction.cpp
+    ${HU_GAMEPHYSICS_ROOT}/BoostProperty.cpp
+    ${HU_GAMEPHYSICS_ROOT}/BoostRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CharacterContextContainer.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CheckPoint.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CheckPointRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CheckpointEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CheckpointPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CollisionEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Console.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ControlsReader.cpp
+    ${HU_GAMEPHYSICS_ROOT}/CustomOgreMaxScene.cpp
+    ${HU_GAMEPHYSICS_ROOT}/EntityCollisionPrevention.cpp
+    ${HU_GAMEPHYSICS_ROOT}/EntityRegister.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Finish.cpp
+    ${HU_GAMEPHYSICS_ROOT}/FinishPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/FinishRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/GameEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/GameEventParser.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUDedicatedServer.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUServer.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUServerCore.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Havok.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HavokEntity.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HavokEntityType.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HavokHovercraft.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HavokHovercraftCollisionEffect.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HavokThread.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HoverAction.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HoverCraftUniverseWorld.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Hovercraft.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftController.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftPlayerController.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftUniverseEntity.cpp
+    ${HU_GAMEPHYSICS_ROOT}/InitEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Loader.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Lobby.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PhantomTrackAction.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PlanetGravityAction.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PlanetGravityPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PlayerSettings.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PlayerSettingsInterceptor.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PortalPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PortalRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PowerupPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/PowerupSpawn.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ProgressMonitor.cpp
+    ${HU_GAMEPHYSICS_ROOT}/RacePlayer.cpp
+    ${HU_GAMEPHYSICS_ROOT}/RaceState.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ResetSpawn.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ServerWorldLoader.cpp
+    ${HU_GAMEPHYSICS_ROOT}/SpeedBoost.cpp
+    ${HU_GAMEPHYSICS_ROOT}/SpeedBoostPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Start.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StartPhantom.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StartPosition.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StartRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StateEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StaticBody.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StaticBodyEntity.cpp
+    ${HU_GAMEPHYSICS_ROOT}/StaticBodyRepresentation.cpp
+    ${HU_GAMEPHYSICS_ROOT}/Track.cpp
+    ${HU_GAMEPHYSICS_ROOT}/TrackInfoLoader.cpp
+    ${HU_GAMEPHYSICS_ROOT}/UpdatePositionAction.cpp
+    ${HU_GAMEPHYSICS_ROOT}/VisualEvent.cpp
+    ${HU_GAMEPHYSICS_ROOT}/VisualEventParser.cpp
+
+    # EXCLUDED (A) -- transitively #include GUIManager.h / SoundManager.h /
+    # Scripting (lua.h, luabind.hpp, OgreLuaBindings.h), none of which are
+    # ported yet. Left on disk untouched; re-add once their blocking
+    # project is ported:
+    #   ClientPreparationLoader.cpp  -- GUI, Sound
+    #   HUApplication.cpp            -- GUI, Sound
+    #   HUClient.cpp                 -- GUI, Sound, Scripting
+    #   HUD.cpp                      -- GUI
+    #   HovercraftAIController.cpp   -- Scripting
+    #   HovercraftRepresentation.cpp -- GUI, Sound
+    #   InGameState.cpp              -- GUI, Sound
+    #   LobbyGUI.cpp                 -- GUI
+    #   LobbyState.cpp               -- GUI, Sound
+    #   MainMenu.cpp                 -- GUI
+    #   MainMenuState.cpp            -- GUI, Sound
+    #   ServerLoader.cpp             -- Scripting
+    #   main.cpp                     -- GUI, Sound (WinMain entry point itself)
+    #   ClientLoader.cpp             -- transitively Sound-tainted: includes
+    #                                    HovercraftRepresentation.h, which
+    #                                    #includes <Moveable3DEmitter.h>
+    #                                    (angle-bracket include, missed by
+    #                                    the taint scan above, which only
+    #                                    followed quoted includes) --
+    #                                    HovercraftUniverse/Sound/Moveable3DEmitter.h,
+    #                                    Sound project, not ported.
+    #   HovercraftLoader.cpp         -- same Moveable3DEmitter.h/Sound taint,
+    #                                    via the same #include chain.
+    #   ClientConnectThread.cpp      -- ClientConnectThread.h #includes
+    #                                    "ConnectListener.h", which only
+    #                                    exists under HovercraftUniverse/GUI/
+    #                                    (GUI project, not ported); also
+    #                                    missed by the taint scan above
+    #                                    because ConnectListener.h itself
+    #                                    doesn't happen to #include
+    #                                    GUIManager.h/SoundManager.h.
+    #
+    # EXCLUDED (B) -- NOT GUI/Sound/Scripting-tainted; each blocked by its
+    # own genuine, pre-existing, non-Havok bug in HovercraftUniverse/**
+    # (confirmed by actually attempting to compile each file against
+    # hu_havok_compat -- same "document rather than hack" rule as (A) and
+    # as the RaceCamera/GameView/EntityPropertySystem findings in
+    # docs/porting/zoidcom-compat.md). See docs/porting/havok-compat.md for
+    # detail on each:
+    #   PortalData.cpp  -- #includes "PortalData.h", which does not exist
+    #                       anywhere in the repository (an orphaned .cpp
+    #                       with no matching header -- the header was
+    #                       apparently never committed, or removed without
+    #                       removing the .cpp).
+    #   Portal.cpp      -- calls the Ogre 1.x `Ogre::vector<Ogre::String>::type`
+    #                       + `Ogre::StringUtil::split()` idiom, both removed
+    #                       in Ogre 14.5.2 -- an ogre-api-gap issue (same
+    #                       class as docs/porting/ogre-api-gap.md), just not
+    #                       caught by that document's original pass because
+    #                       this file was Havok-blocked at the time.
+    #   PathRecorder.cpp,
+    #   HUServerThread.cpp -- both call `boost::xtime`/`boost::TIME_UTC`
+    #                          (removed from modern Boost;
+    #                          `boost::thread::sleep(xtime)` was deprecated
+    #                          and dropped years ago in favor of
+    #                          `boost::this_thread::sleep_for`) -- a
+    #                          boost-version-api-gap issue, unrelated to
+    #                          Havok. (HUServerThread.cpp's own dedicated-
+    #                          server tick loop calls this to pace itself;
+    #                          HavokThread.cpp, which drives the physics
+    #                          step loop itself, uses plain Win32 Sleep()
+    #                          instead and is unaffected.)
+)
+
+target_include_directories(hu_game_physics PUBLIC
+    ${HU_GAMEPHYSICS_ROOT}
+    ${HU_COREENGINE_ROOT}
+    ${HU_NETWORKING_ROOT}
+    ${HU_OGREMAX_ROOT}
+    ${HU_ROOT}/Utils
+    ${HU_OIS_INCLUDE_DIR}
+)
+
+target_compile_definitions(hu_game_physics PRIVATE
+    WIN32
+    _LIB
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+# Deliberately NOT defining UNICODE/_UNICODE -- same reasoning as
+# hu_ogremax/hu_coreengine above (this project's real .vcproj does define
+# it, but several files here call narrow-buffer Win32 APIs / std::string
+# APIs that are not actually Unicode-clean).
+
+if(MSVC)
+    # Deliberately re-enabling permissive (non-conformant) parsing for THIS
+    # target only, overriding the top-level `/permissive-` set above.
+    # HovercraftUniverse/Utils/PlayerMapImpl.h (a template, `PlayerMap<Key,
+    # Player, Unique>::find()`) uses several dependent-type names
+    # (`list_type::iterator`) without the `typename` keyword they
+    # technically need; MSVC's classic (permissive) two-phase lookup
+    # tolerates that, strict `/permissive-` two-phase lookup does not
+    # (C7510/C2065/C3878 cascades). Likewise
+    # HovercraftUniverse/HovercraftUniverse/CustomOgreMaxScene.h declares
+    # `Ogre::String CustomOgreMaxScene::getUniqueName();` *inside* the
+    # class body it belongs to (a redundant, invalid qualifier) -- rejected
+    # under strict conformance as C4596, tolerated under permissive parsing.
+    # Both are genuine, pre-existing bugs in code this porting effort is not
+    # allowed to touch (HovercraftUniverse/**); relaxing conformance for
+    # just this one target is the least invasive fix available. See
+    # docs/porting/havok-compat.md.
+    target_compile_options(hu_game_physics PRIVATE /permissive)
+
+    # Havok.h/HavokThread.h (both HovercraftUniverse/**, not ours to edit)
+    # declare `DWORD WINAPI runHavok(LPVOID lpParam);` without ever
+    # #including <windows.h> themselves -- in the original VC9 .vcproj this
+    # worked because some other header earlier in that project's
+    # precompiled-header chain already pulled in <windows.h> first. This
+    # target has no precompiled header, so the same real, pre-existing gap
+    # now surfaces as DWORD/WINAPI/LPVOID being undeclared. Forcing
+    # <windows.h> in ahead of every translation unit reproduces the old
+    # implicit-PCH behavior without touching game code.
+    target_compile_options(hu_game_physics PRIVATE /FI windows.h)
+endif()
+
+# RaceState.h needs boost::random (a Mersenne-twister RNG for lobby/track
+# selection) and HUClient.h/ClientConnectThread.cpp need
+# boost::interprocess (a semaphore) -- both genuine, narrow dependency
+# gaps (the packages simply weren't in the original bootstrap script's
+# vcpkg install list), fixed the same way boost-thread was added for
+# hu_coreengine. Installed via:
+#   vcpkg install boost-random:x86-windows boost-interprocess:x86-windows
+# scripts/bootstrap-modern-deps.ps1 should gain these too (tracked
+# separately; not this task's file to edit blindly, but flagged here).
+find_package(Boost REQUIRED COMPONENTS random)
+find_package(Boost QUIET COMPONENTS interprocess) # header-only; component mainly used to confirm presence
+
+target_link_libraries(hu_game_physics PUBLIC
+    hu_havok_compat
+    hu_coreengine
+    hu_networking
+    hu_zoidcom_compat
+    hu_ogremax
+    hu_utils
+    hu_exceptions
+    OgreMain
+    OgreOverlay
+    Boost::thread
+    Boost::random
+)
