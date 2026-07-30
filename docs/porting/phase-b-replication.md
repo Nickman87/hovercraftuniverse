@@ -357,9 +357,59 @@ Not needed for racing, left stubbed and logged:
   ([Entity.cpp:286-291](../../HovercraftUniverse/CoreEngine/Entity.cpp)). We do our own
   smoothing now anyway, from the 60 Hz work in `89335b4`.
 - **LAN discovery, file transfer, lag/loss simulation.**
-- **App-level handshake payload.** The connect-request bitstream isn't transmitted
-  ([Control.cpp:9-28](../../compat/zoidcom/src/Control.cpp)), but no game code sends one —
-  `ClientConnectThread` passes `0`. There is no auth, no password and no protocol-version
-  check in this game. Worth noting as a security property of the original design rather than
-  something Phase B introduces: **any client that can reach the port is accepted** if the lobby
-  has room and no race is active.
+- ~~**App-level handshake payload.**~~ **This assessment was wrong — see §9.**
+
+## 9. Correction: the connect handshake is load-bearing
+
+This document originally listed the app-level connect handshake as out of scope, reasoning
+that "no game code sends one — `ClientConnectThread` passes `0`". That is true of the
+*request* direction and irrelevant, because the **reply** direction is what matters, and the
+game depends on it completely.
+
+- Server: `HUServerCore::ZCom_cbConnectionRequest(id, request, reply)`
+  ([HUServerCore.cpp:49-53](../../HovercraftUniverse/HovercraftUniverse/HUServerCore.cpp))
+  writes **the assigned connection id into `reply`**.
+- Client: `HUClient::onConnectResult(id, result, extra)`
+  ([HUClient.cpp:88-119](../../HovercraftUniverse/HovercraftUniverse/HUClient.cpp)) reads its
+  own unique id back out of `extra` and stores it as `mID`.
+
+The shim transmits neither, so the client reads an empty stream and gets `mID = 0`. Observed
+in a real two-process run: the server logs `[Lobby]: New player joined with id 20` while the
+client logs `My unique ID is 0`. Then
+[HUClient.cpp:163](../../HovercraftUniverse/HovercraftUniverse/HUClient.cpp):
+
+```cpp
+mLobby->addPlayer(ent, ent->getConnID() == mID);   // 20 == 0 -> false
+```
+
+files the client's **own** `PlayerSettings` as another player's. `Lobby::getOwnPlayer()`
+returns null, so `Lobby::isAdmin()` is false, so the admin-gated **Start button never
+appears** — confirmed by a human tester, who found no Start button in the lobby.
+
+Note `mAdmin` itself was never the problem: it rides in the init-event snapshot
+([Lobby.cpp:310](../../HovercraftUniverse/HovercraftUniverse/Lobby.cpp) writes it,
+`Lobby.cpp:280` reads it), a path that already works. So the handshake fix alone may be
+enough to make Start appear — which would mean racing is reachable *before* the replication
+tick, not after it.
+
+**Lesson worth keeping.** The original dismissal came from checking only the call site that
+*sends* the request and finding it passed null. The reply direction was never checked. When
+deciding a mechanism is unused, both directions have to be checked — and the cheapest
+possible confirmation was a human glancing at the lobby for a button, which is what finally
+settled it.
+
+## 10. Open, not yet explained
+
+Two observations from the same human test session that are not accounted for:
+
+- **The lobby accepted no input at all** — not the chat box, not `Leave Lobby`. Notably
+  `Leave` is a `MenuButton`, the same class whose `Singleplayer` instance had just been
+  clicked successfully on the main menu, so this is unlikely to be a plain "button missing"
+  problem and looks more like input routing into the lobby state. `LobbyState::activate`
+  ([LobbyState.cpp:166-190](../../HovercraftUniverse/HovercraftUniverse/LobbyState.cpp)) does
+  broadly what `MainMenuState::activate` does, with one visible difference: it never calls
+  `mInputManager->moveMouseTo(...)`, which the menu does. Unconfirmed as a cause.
+- **The process then died or crashed**, with no exception and no Ogre shutdown lines in the
+  log — it simply stops after `[Lobby]: Received initial lobby information`.
+
+Both need reproducing before they can be diagnosed. Neither blocks the handshake fix.
