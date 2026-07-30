@@ -26,6 +26,25 @@ namespace HovUni {
 	#define LUA_CONST(class, name) table[#name] = class::name
 	#define LUA_CONST_END }
 
+	// Vector3::dotProduct()/absDotProduct() are declared to take a parameter
+	// typed as the templated VectorBase<3,float>/Vector<3,float> base in
+	// modern Ogre (Vector3 is now `Vector<3,Real>`, which derives from
+	// VectorBase<3,Real> via a CRTP template -- see OgreVector.h), instead
+	// of a concrete Vector3 like in Ogre 1.7. luabind only knows about the
+	// concrete Vector3 type registered below, so a Lua-side Vector3 can
+	// never match a base-class parameter and every call throws "No
+	// matching overload found". These free-function wrappers forward to
+	// the real methods through a concrete Vector3 parameter, preserving
+	// the exact Lua-visible signature (same idiom as the Camera_setPosition/
+	// Camera_lookAt wrappers further down in this file).
+	static Real Vector3_dotProduct(const Vector3* self, const Vector3& vec) {
+		return self->dotProduct(vec);
+	}
+
+	static Real Vector3_absDotProduct(const Vector3* self, const Vector3& vec) {
+		return self->absDotProduct(vec);
+	}
+
 	void OgreLuaBindings::bindVector3()	{
 		lua_State* L = mLuaState;
 		module(L)
@@ -38,11 +57,11 @@ namespace HovUni {
 			.def(constructor<>())
 			.def(constructor<Vector3&>())
 			.def(constructor<Real, Real, Real>())
-			.def("absDotProduct", &Vector3::absDotProduct)
+			.def("absDotProduct", &Vector3_absDotProduct)
 			.def("crossProduct", &Vector3::crossProduct)
 			.def("directionEquals", &Vector3::directionEquals)
 			.def("distance", &Vector3::distance)
-			.def("dotProduct", &Vector3::dotProduct)
+			.def("dotProduct", &Vector3_dotProduct)
 			.def("getRotationTo", &Vector3::getRotationTo)
 			.def("isZeroLength", &Vector3::isZeroLength)
 			.def("length", &Vector3::length)
