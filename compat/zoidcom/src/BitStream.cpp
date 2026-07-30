@@ -8,6 +8,16 @@
 // entire reason this shim exists), and both ends of every connection in
 // this codebase use this same implementation. See
 // docs/porting/zoidcom-compat.md for more on this design choice.
+//
+// Phase B fix: addBitStream() previously wrote its own redundant embedded
+// bit-count prefix in addition to copying the payload bits. That silently
+// corrupted every caller using the calling convention getBitStream()'s
+// signature actually implies (manually transmit/read the bit count, then
+// call getBitStream(bits)) -- which is exactly what the game's own
+// InitEvent::write()/read() does. See addBitStream()'s comment below for
+// the full explanation. Found while implementing Phase B node-to-node
+// event delivery (docs/porting/phase-b-replication.md step 2), which nests
+// bitstreams the same way.
 #include "zoidcom_shim_internal.h"
 #include <cstdlib>
 #include <cstring>
@@ -327,19 +337,32 @@ zU16 ZCom_BitStream::getBufferMax(void) {
 }
 
 bool ZCom_BitStream::addBitStream(ZCom_BitStream* _stream, bool _allow_align) {
+    // NOTE (Phase B fix): this used to also addInt(bits, 32) a redundant
+    // length prefix of its own here. That desyncs the read cursor for
+    // every caller that follows the calling convention getBitStream()'s
+    // own signature implies -- and that the game's own code already uses,
+    // e.g. HovercraftUniverse/HovercraftUniverse/InitEvent.cpp:
+    //   write(): stream->addInt(mStream->getBitCount(), 32);
+    //            stream->addBitStream(mStream, true);
+    //   read():  zU32 bits = stream->getInt(32);
+    //            mStream = stream->getBitStream(bits, true);
+    // getBitStream() takes an explicit _bits parameter (matching the real
+    // ZoidCom signature) specifically because the caller is expected to
+    // communicate/reconstruct the bit count itself, as InitEvent does. With
+    // the old self-embedded prefix, that manual getInt(32) would consume
+    // the *caller's* length field while leaving this function's own
+    // (redundant) embedded length sitting unconsumed in the stream,
+    // corrupting every subsequent read. Fixed by writing only the raw
+    // payload bits here, matching getBitStream()'s contract exactly.
     if (!_stream) return false;
     zU32 bits = _stream->getBitCount() - (_stream->m_readpos.pos * 8 + _stream->m_readpos.bit);
-    if (!addInt(bits, 32)) return false;
 
     ZCom_BitStream::BitPos saved_read = _stream->m_readpos;
     for (zU32 i = 0; i < bits; i++) {
         bool b = _stream->getBool();
         addBool(b);
     }
-    if (_allow_align) {
-        // Nothing further needed: bit count is embedded above so
-        // getBitStream() can extract exactly this many bits back out.
-    }
+    (void) _allow_align;
     _stream->m_readpos = saved_read; // don't disturb caller's stream
     return true;
 }

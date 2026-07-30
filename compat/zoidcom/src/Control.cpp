@@ -6,6 +6,27 @@
 // work over an actual ENetHost. Class ID registration is a real (if
 // trivial) name->id table.
 //
+// Real (Phase B, steps 1-2 -- see docs/porting/phase-b-replication.md and
+// docs/porting/zoidcom-original-semantics.md): this file now owns the
+// per-control node registry (network-id space, netid->node map, and
+// class-id->node map for locally-registered unique nodes) and the wire
+// dispatch for cross-network node linking and node-to-node events:
+//   NODE_CREATE (kind 2)       authority -> proxy: spawn a dynamic node
+//   NODE_LINK_UNIQUE (kind 3)  authority -> proxy: link a unique node
+//   NODE_REMOVE (kind 4)       authority -> proxy: a node went away
+//   NODE_OWNER (kind 5)        authority -> proxy: role promotion/demotion
+//   NODE_EVENT (kind 6)        both ways: a ZCom_Node::sendEvent* payload
+// See docs/porting/phase-b-replication.md §4 for the full wire table.
+//
+// IMPORTANT (see phase-b-replication.md §6.1): the node registry and the
+// network-id counter below are members of ZCom_Control_Private, i.e.
+// scoped per ZCom_Control instance. They must NEVER become static/file-
+// global: single-player runs the server and client as two ZCom_Control
+// instances in the SAME PROCESS (one on a boost thread, one on the main
+// thread), and a shared registry would let the client resolve a network id
+// to the server's own ZCom_Node object -- which would appear to work in
+// single-player and fail utterly over a real network.
+//
 // KNOWN SEMANTIC GAP (documented in docs/porting/zoidcom-compat.md):
 // real ZoidCom's connection handshake is app-negotiated -- the server's
 // ZCom_cbConnectionRequest() can reject a connection *before* the client
@@ -28,18 +49,24 @@
 // would close this gap.
 //
 // TODO(phaseB) stubs: Zoidlevels/ZCom_requestZoidMode, LAN discovery
-// (ZCom_Discover/ZCom_setDiscoverListener), ZCom_getNode() (needs the node
-// registry Phase B builds), lag/loss simulation.
+// (ZCom_Discover/ZCom_setDiscoverListener), lag/loss simulation.
 #include "zoidcom_shim_internal.h"
 #include <enet/enet.h>
 #include <map>
+#include <set>
 #include <vector>
 #include <string>
 #include <cstring>
 
 namespace {
-const zU8 kMsgRawData = 0;
+const zU8 kMsgRawData        = 0;
 const zU8 kMsgDisconnectReason = 1;
+const zU8 kMsgNodeCreate      = 2;
+const zU8 kMsgNodeLinkUnique  = 3;
+const zU8 kMsgNodeRemove      = 4;
+const zU8 kMsgNodeOwner       = 5;
+const zU8 kMsgNodeEvent       = 6;
+
 const size_t kMaxPeers = 64;
 const size_t kChannelCount = 2;
 }
@@ -64,8 +91,24 @@ public:
     ZCom_ConnGroupManager group_mgr;
     ZCom_ConnStats zero_stats;
 
+    // --- Phase B: per-control node registry (see file header) --------------
+    ZCom_NodeID next_network_id;
+    std::map<ZCom_NodeID, ZCom_Node*> nodes_by_netid;
+    std::map<ZCom_ClassID, ZCom_Node*> unique_nodes_by_class;
+    std::set<ZCom_Node*> pending_flush_nodes;
+
+    // Valid only while dispatching a NODE_CREATE's ZCom_cbNodeRequest_Dynamic()
+    // callback -- lets ZCom_Node::registerNodeDynamic(), called by the game
+    // from inside that callback, discover the netid/authority-connection the
+    // incoming message assigned.
+    bool dispatching_dynamic_request;
+    ZCom_NodeID pending_dynamic_netid;
+    ZCom_ConnID pending_dynamic_conn;
+
     ZCom_Control_Private()
-        : host(NULL), control_id(0), next_conn_id(1) {
+        : host(NULL), control_id(0), next_conn_id(1),
+          next_network_id(1), dispatching_dynamic_request(false),
+          pending_dynamic_netid(0), pending_dynamic_conn(ZCom_Invalid_ID) {
         memset(&zero_stats, 0, sizeof(zero_stats));
         class_names.push_back(""); // ZCom_Invalid_ID placeholder
     }
@@ -152,11 +195,22 @@ ZCom_ClassID ZCom_Control::ZCom_getClassID(const char* _name) const {
 
 // --- packet helpers --------------------------------------------------------
 
-static void sendKind(ENetPeer* peer, zU8 kind, const char* bytes, zU16 len, bool reliable) {
-    ENetPacket* packet = enet_packet_create(NULL, len + 1, reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
+static void sendKind(ENetPeer* peer, zU8 kind, const char* bytes, zU16 len, bool reliable, zU8 channel = 0) {
+    ENetPacket* packet = enet_packet_create(NULL, len + 1, reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED);
     packet->data[0] = kind;
     if (len) memcpy(packet->data + 1, bytes, len);
-    enet_peer_send(peer, 0, packet);
+    enet_peer_send(peer, channel, packet);
+}
+
+// Serializes _envelope and sends it (kind byte prefixed) to _peer, reliable
+// ordered on channel 0. Used by all the Phase B node-linking/event sends
+// below, which are all small enough for a fixed on-stack buffer.
+static bool sendEnvelope(ENetPeer* _peer, zU8 _kind, ZCom_BitStream& _envelope) {
+    char buf[4096];
+    zU16 size = 0;
+    if (!_envelope.Serialize(buf, &size, sizeof(buf))) return false;
+    sendKind(_peer, _kind, buf, size, true, 0);
+    return true;
 }
 
 // --- connect / disconnect ----------------------------------------------------
@@ -303,9 +357,7 @@ bool ZCom_Control::ZCom_requestZoidMode(const ZCom_ConnID _id, zU8 _level) {
 }
 
 ZCom_Node* ZCom_Control::ZCom_getNode(ZCom_NodeID _nid) const {
-    (void) _nid;
-    zshim::todoPhaseBOnce("ZCom_Control::ZCom_getNode", "node registry lookup by network id is not implemented");
-    return NULL;
+    return ZCom_shimFindNetId(_nid);
 }
 
 const ZCom_Address* ZCom_Control::ZCom_getPeer(ZCom_ConnID _id) const {
@@ -351,6 +403,142 @@ void ZCom_Control::ZCom_simulateLoss(ZCom_ConnID _id, zFloat _amount) {
 ZCom_BitStream* ZCom_Control::ZCom_createBitStream() { return new ZCom_BitStream(); }
 void ZCom_Control::ZCom_deleteBitStream(ZCom_BitStream* _bs) { delete _bs; }
 
+// --- Phase B: node registry / linking / event wire sends --------------------
+
+ZCom_NodeID ZCom_Control::ZCom_shimAllocNetworkId() {
+    return m_priv->next_network_id++;
+}
+
+void ZCom_Control::ZCom_shimBindNetId(ZCom_NodeID _netid, ZCom_Node* _node) {
+    m_priv->nodes_by_netid[_netid] = _node;
+}
+
+void ZCom_Control::ZCom_shimUnbindNetId(ZCom_NodeID _netid) {
+    m_priv->nodes_by_netid.erase(_netid);
+}
+
+ZCom_Node* ZCom_Control::ZCom_shimFindNetId(ZCom_NodeID _netid) const {
+    std::map<ZCom_NodeID, ZCom_Node*>::const_iterator it = m_priv->nodes_by_netid.find(_netid);
+    return it == m_priv->nodes_by_netid.end() ? NULL : it->second;
+}
+
+void ZCom_Control::ZCom_shimBindUniqueClass(ZCom_ClassID _classid, ZCom_Node* _node) {
+    m_priv->unique_nodes_by_class[_classid] = _node;
+}
+
+void ZCom_Control::ZCom_shimUnbindUniqueClass(ZCom_ClassID _classid, ZCom_Node* _node) {
+    std::map<ZCom_ClassID, ZCom_Node*>::iterator it = m_priv->unique_nodes_by_class.find(_classid);
+    if (it != m_priv->unique_nodes_by_class.end() && it->second == _node) {
+        m_priv->unique_nodes_by_class.erase(it);
+    }
+}
+
+ZCom_Node* ZCom_Control::ZCom_shimFindUniqueClass(ZCom_ClassID _classid) const {
+    std::map<ZCom_ClassID, ZCom_Node*>::const_iterator it = m_priv->unique_nodes_by_class.find(_classid);
+    return it == m_priv->unique_nodes_by_class.end() ? NULL : it->second;
+}
+
+std::vector<ZCom_ConnID> ZCom_Control::ZCom_shimAllConnections() const {
+    std::vector<ZCom_ConnID> conns;
+    conns.reserve(m_priv->conn_to_peer.size());
+    for (std::map<ZCom_ConnID, ENetPeer*>::const_iterator it = m_priv->conn_to_peer.begin();
+         it != m_priv->conn_to_peer.end(); ++it) {
+        conns.push_back(it->first);
+    }
+    return conns;
+}
+
+eZCom_NodeRole ZCom_Control::ZCom_shimRegisterDynamicNode(ZCom_Node* _node) {
+    if (m_priv->dispatching_dynamic_request) {
+        _node->ZCom_shimBindSelf(m_priv->pending_dynamic_netid, m_priv->pending_dynamic_conn);
+        m_priv->nodes_by_netid[m_priv->pending_dynamic_netid] = _node;
+        return eZCom_RoleProxy;
+    }
+    ZCom_NodeID netid = m_priv->next_network_id++;
+    _node->ZCom_shimBindSelf(netid, ZCom_Invalid_ID);
+    m_priv->nodes_by_netid[netid] = _node;
+    return eZCom_RoleAuthority;
+}
+
+void ZCom_Control::ZCom_shimNotePendingFlush(ZCom_Node* _node) {
+    m_priv->pending_flush_nodes.insert(_node);
+}
+
+void ZCom_Control::ZCom_shimForgetPendingFlush(ZCom_Node* _node) {
+    m_priv->pending_flush_nodes.erase(_node);
+}
+
+void ZCom_Control::ZCom_shimSendNodeCreate(ZCom_ConnID _conn, ZCom_ClassID _classid, ZCom_NodeID _netid,
+                                            eZCom_NodeRole _role, ZCom_BitStream* _announce_data) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_classid, 32);
+    envelope.addInt(_netid, 32);
+    envelope.addBool(_role == eZCom_RoleOwner);
+    zU32 bits = _announce_data ? _announce_data->getBitCount() : 0;
+    envelope.addInt(bits, 32);
+    if (bits) envelope.addBitStream(_announce_data, true);
+
+    sendEnvelope(it->second, kMsgNodeCreate, envelope);
+}
+
+void ZCom_Control::ZCom_shimSendNodeLinkUnique(ZCom_ConnID _conn, ZCom_ClassID _classid, ZCom_NodeID _netid) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_classid, 32);
+    envelope.addInt(_netid, 32);
+
+    sendEnvelope(it->second, kMsgNodeLinkUnique, envelope);
+}
+
+void ZCom_Control::ZCom_shimSendNodeOwner(ZCom_ConnID _conn, ZCom_NodeID _netid, bool _enabled) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_netid, 32);
+    envelope.addBool(_enabled);
+
+    sendEnvelope(it->second, kMsgNodeOwner, envelope);
+}
+
+void ZCom_Control::ZCom_shimSendNodeRemove(ZCom_ConnID _conn, ZCom_NodeID _netid) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_netid, 32);
+
+    sendEnvelope(it->second, kMsgNodeRemove, envelope);
+}
+
+bool ZCom_Control::ZCom_shimSendNodeEvent(ZCom_ConnID _conn, ZCom_NodeID _netid, eZCom_SendMode _mode, ZCom_BitStream* _data) {
+    std::map<ZCom_ConnID, ENetPeer*>::iterator it = m_priv->conn_to_peer.find(_conn);
+    if (it == m_priv->conn_to_peer.end()) return false;
+
+    ZCom_BitStream envelope;
+    envelope.addInt(_netid, 32);
+    envelope.addInt(zshim::currentTimeMillis(), 32);
+    zU32 bits = _data ? _data->getBitCount() : 0;
+    envelope.addInt(bits, 32);
+    if (bits) envelope.addBitStream(_data, true);
+
+    char buf[4096];
+    zU16 size = 0;
+    if (!envelope.Serialize(buf, &size, sizeof(buf))) return false;
+
+    bool reliable = (_mode != eZCom_Unreliable);
+    zU8 channel = (_mode == eZCom_ReliableOrdered) ? 0 : 1;
+    ENetPacket* packet = enet_packet_create(NULL, size + 1, reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED);
+    packet->data[0] = kMsgNodeEvent;
+    if (size) memcpy(packet->data + 1, buf, size);
+    return enet_peer_send(it->second, channel, packet) == 0;
+}
+
 // --- the actual ENet pump ----------------------------------------------------
 
 void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
@@ -385,6 +573,20 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                     ZCom_BitStream request, reply;
                     bool accept = ZCom_cbConnectionRequest(id, request, reply);
                     if (accept) {
+                        // Phase B: link any locally-registered authority
+                        // *unique* nodes to this newly-accepted connection
+                        // BEFORE notifying the game via
+                        // ZCom_cbConnectionSpawned() -- so that if the game
+                        // synchronously calls setOwner() in response (e.g.
+                        // Lobby::onConnect() granting admin), the connection
+                        // is already linked and the promotion isn't silently
+                        // dropped. See phase-b-replication.md §3.1/§6.1.
+                        for (std::map<ZCom_ClassID, ZCom_Node*>::iterator uit = m_priv->unique_nodes_by_class.begin();
+                             uit != m_priv->unique_nodes_by_class.end(); ++uit) {
+                            if (uit->second->getRole() == eZCom_RoleAuthority) {
+                                uit->second->ZCom_shimQueueAnnounce(id);
+                            }
+                        }
                         ZCom_cbConnectionSpawned(id);
                     } else {
                         m_priv->conn_to_peer.erase(id);
@@ -400,16 +602,85 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                 if (conn_it != m_priv->peer_to_conn.end() && event.packet->dataLength >= 1) {
                     zU8 kind = event.packet->data[0];
                     zU16 payload_len = (zU16) (event.packet->dataLength - 1);
+                    ZCom_ConnID from_conn = conn_it->second;
+
                     if (kind == kMsgRawData) {
                         ZCom_BitStream data;
                         data.Deserialize((char*) event.packet->data + 1, payload_len);
-                        ZCom_cbDataReceived(conn_it->second, data);
+                        ZCom_cbDataReceived(from_conn, data);
                     } else if (kind == kMsgDisconnectReason) {
                         std::string bytes((const char*) event.packet->data + 1, payload_len);
-                        m_priv->pending_disconnect_reason[conn_it->second] = bytes;
+                        m_priv->pending_disconnect_reason[from_conn] = bytes;
+                    } else if (kind == kMsgNodeCreate) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_ClassID classid = envelope.getInt(32);
+                        ZCom_NodeID netid = envelope.getInt(32);
+                        bool is_owner = envelope.getBool();
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* announce = bits ? envelope.getBitStream(bits, true) : NULL;
+
+                        m_priv->pending_dynamic_netid = netid;
+                        m_priv->pending_dynamic_conn = from_conn;
+                        m_priv->dispatching_dynamic_request = true;
+                        ZCom_cbNodeRequest_Dynamic(from_conn, classid, announce,
+                            is_owner ? eZCom_RoleOwner : eZCom_RoleProxy, netid);
+                        m_priv->dispatching_dynamic_request = false;
+
+                        if (is_owner) {
+                            ZCom_Node* node = ZCom_shimFindNetId(netid);
+                            if (node) node->ZCom_shimSetOwnerRole(true);
+                        }
+                        delete announce;
+                    } else if (kind == kMsgNodeLinkUnique) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_ClassID classid = envelope.getInt(32);
+                        ZCom_NodeID netid = envelope.getInt(32);
+
+                        ZCom_Node* node = ZCom_shimFindUniqueClass(classid);
+                        if (node && node->getNetworkID() == 0) {
+                            node->ZCom_shimBindSelf(netid, from_conn);
+                            ZCom_shimBindNetId(netid, node);
+                        }
+                    } else if (kind == kMsgNodeOwner) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_NodeID netid = envelope.getInt(32);
+                        bool enabled = envelope.getBool();
+
+                        ZCom_Node* node = ZCom_shimFindNetId(netid);
+                        if (node) node->ZCom_shimSetOwnerRole(enabled);
+                    } else if (kind == kMsgNodeRemove) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_NodeID netid = envelope.getInt(32);
+
+                        ZCom_Node* node = ZCom_shimFindNetId(netid);
+                        if (node) {
+                            node->ZCom_shimDeliverRemove(from_conn);
+                            ZCom_shimUnbindNetId(netid);
+                        }
+                    } else if (kind == kMsgNodeEvent) {
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        ZCom_NodeID netid = envelope.getInt(32);
+                        zU32 sent_time = envelope.getInt(32);
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* payload = bits ? envelope.getBitStream(bits, true) : new ZCom_BitStream();
+
+                        ZCom_Node* node = ZCom_shimFindNetId(netid);
+                        if (node) {
+                            eZCom_NodeRole remote_role = (node->getRole() == eZCom_RoleAuthority)
+                                ? node->ZCom_shimRemoteRoleFor(from_conn)
+                                : eZCom_RoleAuthority;
+                            node->ZCom_shimDeliverEvent(eZCom_EventUser, remote_role, from_conn, payload, sent_time);
+                        } else {
+                            delete payload;
+                        }
                     } else {
                         zshim::todoPhaseBOnce("ZCom_Control::ZCom_processInput(unknown-kind)",
-                            "received a message kind reserved for node/replicator traffic, which Phase A doesn't route yet");
+                            "received a message kind this shim doesn't recognize");
                     }
                 }
                 enet_packet_destroy(event.packet);
@@ -425,6 +696,20 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                         reason.Deserialize(&reason_it->second[0], (zU16) reason_it->second.size());
                         m_priv->pending_disconnect_reason.erase(reason_it);
                     }
+
+                    // Phase B: tell every node registered on this control
+                    // that _id is gone (drives eZCom_EventRemoved -- see
+                    // ZCom_Node::ZCom_shimNoteConnectionClosed()). Copy the
+                    // node list first since these calls don't touch the map
+                    // but this keeps iteration safe regardless.
+                    std::vector<ZCom_Node*> nodes;
+                    nodes.reserve(m_priv->nodes_by_netid.size());
+                    for (std::map<ZCom_NodeID, ZCom_Node*>::iterator nit = m_priv->nodes_by_netid.begin();
+                         nit != m_priv->nodes_by_netid.end(); ++nit) {
+                        nodes.push_back(nit->second);
+                    }
+                    for (size_t i = 0; i < nodes.size(); i++) nodes[i]->ZCom_shimNoteConnectionClosed(id);
+
                     ZCom_cbConnectionClosed(id, eZCom_ClosedDisconnect, reason);
 
                     m_priv->conn_to_peer.erase(id);
@@ -445,9 +730,22 @@ void ZCom_Control::ZCom_processReplicators(zU32 _simulation_time_passed) {
     (void) _simulation_time_passed;
     zshim::todoPhaseBOnce("ZCom_Control::ZCom_processReplicators",
         "no live replication tick yet: registered ZCom_ReplicatorBasic/Advanced instances are never polled "
-        "(checkState()/packData()/unpackData()/Process() are not called)");
+        "(checkState()/packData()/unpackData()/Process() are not called) -- this is step 3, out of scope for "
+        "the node-linking/event-delivery pass");
 }
 
 void ZCom_Control::ZCom_processOutput() {
+    // Phase B: flush any deferred node announcements (NODE_CREATE /
+    // NODE_LINK_UNIQUE), now that any setOwner() calls made since they were
+    // queued have had a chance to land -- see
+    // ZCom_Node::ZCom_shimFlushPendingAnnouncements() and this file's header.
+    if (!m_priv->pending_flush_nodes.empty()) {
+        std::vector<ZCom_Node*> nodes(m_priv->pending_flush_nodes.begin(), m_priv->pending_flush_nodes.end());
+        m_priv->pending_flush_nodes.clear();
+        for (size_t i = 0; i < nodes.size(); i++) {
+            nodes[i]->ZCom_shimFlushPendingAnnouncements();
+        }
+    }
+
     if (m_priv->host) enet_host_flush(m_priv->host);
 }

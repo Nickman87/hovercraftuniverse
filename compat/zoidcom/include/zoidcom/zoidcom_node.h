@@ -3,18 +3,41 @@
 * node object -- ZoidCom-compatible shim
 *
 * Real (Phase A): node identity bookkeeping (class id, role, control
-* pointer, network id assignment for authority nodes), per-connection and
-* global user data storage, replicator list ownership/autodelete.
+* pointer), per-connection and global user data storage, replicator list
+* ownership/autodelete.
 *
-* TODO(phaseB) stubs: cross-network node linking (a proxy node on one
-* ZCom_Control never actually links up with its authority counterpart on
-* another ZCom_Control), data replication (addReplicationInt/Float/Bool/
-* String/StringW, addInterpolationInt/Float -- recorded but never synced),
-* event queue (checkEventWaiting()/getNextEvent() -- always empty),
-* sendEvent()/sendEventDirect() (log + drop), Zoidlevel membership,
-* mustsync/authority migration, file transfer. See
-* docs/porting/zoidcom-compat.md for the full rationale and what Phase B
-* needs to build.
+* Real (Phase B, steps 1-2 -- see docs/porting/phase-b-replication.md):
+* cross-network node linking (registerNodeDynamic/registerNodeUnique now
+* actually link an authority node on one ZCom_Control to proxy/owner
+* counterparts on connected ZCom_Controls, via NODE_CREATE/NODE_LINK_UNIQUE/
+* NODE_OWNER/NODE_REMOVE wire messages -- see Control.cpp), setAnnounceData
+* (now carries real payload, delivered with NODE_CREATE), setOwner (real
+* permission gate + NODE_OWNER wire message), the node event queue
+* (checkEventWaiting()/getNextEvent(), a real per-node queue),
+* sendEvent()/sendEventDirect()/sendEventToGroup() (real delivery via
+* NODE_EVENT, replication-rule-filtered), eZCom_EventInit (raised on the
+* authority when a proxy/owner newly links, per
+* docs/porting/zoidcom-original-semantics.md §1) and eZCom_EventRemoved
+* (raised on connection loss / NODE_REMOVE, mandatory on the proxy/owner
+* side per the same doc's §9).
+*
+* Still TODO(phaseB) stubs: data replication (addReplicationInt/Float/Bool/
+* String/StringW, addInterpolationInt/Float, addReplicator -- recorded but
+* never synced; that's step 3, deliberately out of scope for this pass),
+* Zoidlevel membership (applyForZoidLevel/registerNodeByTag), mustsync/
+* Zoidlevel authority migration, file transfer.
+*
+* This header also declares a handful of `ZCom_shim*` methods that are NOT
+* part of the real ZoidCom API -- they exist purely so
+* compat/zoidcom/src/Control.cpp (which owns the per-ZCom_Control node
+* registry and the ENet wire encode/decode) can drive this node's linking/
+* event-queue/role state from incoming network traffic. Game code must
+* never call them.
+*
+* See docs/porting/zoidcom-compat.md for the Phase A rationale and
+* docs/porting/phase-b-replication.md / docs/porting/
+* zoidcom-original-semantics.md for the Phase B design and the real
+* library's documented semantics this implementation follows.
 *****************************************/
 
 #ifndef _ZOIDNODE_H_
@@ -57,6 +80,14 @@ class ZCOM_API ZCom_Node
 {
 protected:
   ZCom_Node_Private *m_priv;
+
+private:
+  // Phase B internal helpers (compat/zoidcom/src/Node.cpp). Not part of the
+  // real API surface -- see the ZCom_shim* methods below for what Control.cpp
+  // is allowed to call from outside this class.
+  void pushEvent( eZCom_Event _type, eZCom_NodeRole _remote_role, ZCom_ConnID _conn_id,
+    ZCom_BitStream* _data, zU32 _estimated_time_sent );
+  void noteConnectionLinkedEventInit( ZCom_ConnID _conn );
 
 public:
   ZCom_Node( void );
@@ -133,6 +164,59 @@ public:
   bool isPrivate() const;
   ZCom_ClassID getClassID() const;
   ZCom_NodeID getNetworkID() const;
+
+  /* ---------------------------------------------------------------------
+   * Phase B shim-internal hooks. NOT part of the real ZoidCom API --
+   * used only by compat/zoidcom/src/Control.cpp to deliver wire-level
+   * linking, ownership changes and events into this node. Game code must
+   * never call these. See the file header above and
+   * docs/porting/phase-b-replication.md.
+   * ------------------------------------------------------------------ */
+
+  /// Bind this node's own network id (and, for a proxy/owner node, the
+  /// connection its authority lives on) once it is known -- either
+  /// self-assigned (authority) or received from the peer (proxy/owner).
+  void ZCom_shimBindSelf(ZCom_NodeID _netid, ZCom_ConnID _authority_conn);
+
+  /// Authority-side only: mark _conn as newly relevant to this node and
+  /// queue the deferred NODE_CREATE/NODE_LINK_UNIQUE announcement (flushed
+  /// from ZCom_processOutput(), see ZCom_shimFlushPendingAnnouncements()).
+  void ZCom_shimQueueAnnounce(ZCom_ConnID _conn);
+
+  /// Authority-side only: send the deferred announcement(s) queued by
+  /// ZCom_shimQueueAnnounce() for every connection still pending, using
+  /// whatever role (Proxy/Owner) is current at flush time -- this is what
+  /// lets a setOwner() call made synchronously after registration (as the
+  /// game commonly does) land in the very first announcement instead of a
+  /// separate, later message.
+  void ZCom_shimFlushPendingAnnouncements();
+
+  /// Proxy/owner-side: apply a role change received via a NODE_OWNER wire
+  /// message (or embedded directly in a NODE_CREATE for a node that was
+  /// already an owner at announce time).
+  void ZCom_shimSetOwnerRole(bool _is_owner);
+
+  /// Deliver an incoming NODE_EVENT (or a locally-synthesized
+  /// eZCom_EventInit/eZCom_EventRemoved) into this node's event queue.
+  void ZCom_shimDeliverEvent(eZCom_Event _type, eZCom_NodeRole _remote_role, ZCom_ConnID _conn_id,
+    ZCom_BitStream* _data, zU32 _estimated_time_sent);
+
+  /// A NODE_REMOVE arrived for this node from _from_conn. Mandatory
+  /// eZCom_EventRemoved delivery (cannot be gated by setEventNotification()
+  /// on the receiving/proxy side -- see zoidcom-original-semantics.md §9).
+  void ZCom_shimDeliverRemove(ZCom_ConnID _from_conn);
+
+  /// _conn just disconnected from the control this node lives on. Cleans
+  /// up authority-side bookkeeping (optionally raising eZCom_EventRemoved
+  /// if setEventNotification(_, true) was requested) or, if this node is a
+  /// proxy/owner whose authority connection just closed, raises the
+  /// mandatory eZCom_EventRemoved.
+  void ZCom_shimNoteConnectionClosed(ZCom_ConnID _conn);
+
+  /// Authority-side only: the role (Proxy/Owner) this node currently
+  /// considers _conn to have, defaulting to Proxy if _conn isn't linked.
+  /// Used to fill in remote_role when delivering an incoming NODE_EVENT.
+  eZCom_NodeRole ZCom_shimRemoteRoleFor(ZCom_ConnID _conn) const;
 };
 
 #endif
