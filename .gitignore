@@ -41,6 +41,8 @@ local-game/
 
 # Local toolchain installers and sandbox build outputs (the automation itself is committed)
 toolchain/*.iso
+toolchain/*.exe
 toolchain/vs2008-express/
+toolchain/dxsdk/
 toolchain/sandbox/artifacts/
 toolchain/sandbox/*.log
