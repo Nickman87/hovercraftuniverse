@@ -159,13 +159,46 @@ try {
             Write-Host "DISM completed with exit code $($dism.ExitCode)."
         }
 
+        Write-Phase 'Copy ISO to sandbox-local disk'
+        # Mounting directly from the mapped share (C:\repo is VMSMB-backed) is
+        # unreliable inside Windows Sandbox. Copy it to a local path first.
+        $LocalIsoPath = 'C:\vs2008.iso'
+        Write-Host "Copying ISO to local disk: $IsoPath -> $LocalIsoPath (~750 MB, this can take a minute)..."
+        Copy-Item -Path $IsoPath -Destination $LocalIsoPath -Force
+        Write-Host "Copy complete: $((Get-Item $LocalIsoPath).Length) bytes"
+
         Write-Phase 'Mount VS2008 Express ISO'
-        $mounted = Mount-DiskImage -ImagePath $IsoPath -PassThru
-        $driveLetter = ($mounted | Get-Volume).DriveLetter
-        if (-not $driveLetter) {
-            throw "Failed to determine drive letter for mounted ISO '$IsoPath'."
+        Mount-DiskImage -ImagePath $LocalIsoPath -PassThru | Out-Null
+
+        $isoRoot = $null
+        $mountDeadline = (Get-Date).AddSeconds(15)
+
+        while (-not $isoRoot -and (Get-Date) -lt $mountDeadline) {
+            $vol = Get-DiskImage -ImagePath $LocalIsoPath -ErrorAction SilentlyContinue | Get-Volume -ErrorAction SilentlyContinue
+            if ($vol -and $vol.DriveLetter) {
+                $isoRoot = "$($vol.DriveLetter):\"
+            }
+            else {
+                Start-Sleep -Seconds 2
+            }
         }
-        $isoRoot = "${driveLetter}:\"
+
+        if (-not $isoRoot) {
+            Write-Host 'Drive letter not resolved via Get-DiskImage/Get-Volume; scanning all volumes for VCExpress\setup.exe...'
+            $candidate = Get-Volume -ErrorAction SilentlyContinue |
+                Where-Object { $_.DriveLetter } |
+                Where-Object { Test-Path "$($_.DriveLetter):\VCExpress\setup.exe" } |
+                Select-Object -First 1
+
+            if ($candidate) {
+                $isoRoot = "$($candidate.DriveLetter):\"
+            }
+        }
+
+        if (-not $isoRoot) {
+            throw "Failed to determine drive letter for mounted ISO '$LocalIsoPath' (tried Get-DiskImage/Get-Volume retry loop and a full volume scan for VCExpress\setup.exe)."
+        }
+
         Write-Host "ISO mounted at $isoRoot"
 
         try {
@@ -215,11 +248,21 @@ try {
         finally {
             Write-Phase 'Dismount VS2008 Express ISO'
             try {
-                Dismount-DiskImage -ImagePath $IsoPath -ErrorAction Stop | Out-Null
+                Dismount-DiskImage -ImagePath $LocalIsoPath -ErrorAction Stop | Out-Null
                 Write-Host 'ISO dismounted.'
             }
             catch {
                 Write-Host "Warning: failed to dismount ISO cleanly: $($_.Exception.Message)"
+            }
+
+            if (Test-Path $LocalIsoPath) {
+                try {
+                    Remove-Item -Path $LocalIsoPath -Force -ErrorAction Stop
+                    Write-Host "Removed local ISO copy: $LocalIsoPath"
+                }
+                catch {
+                    Write-Host "Warning: failed to remove local ISO copy '$LocalIsoPath': $($_.Exception.Message)"
+                }
             }
         }
     }
