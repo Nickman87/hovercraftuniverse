@@ -604,6 +604,12 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/RepresentationManager.cpp
     ${HU_COREENGINE_ROOT}/Application.cpp
 
+    # New file pair (not part of the original CoreEngine.vcproj -- see the
+    # Ogre-14-API-fix comment in Application.cpp's createRoot()): restores
+    # Ogre 1.7's first-definition-wins handling of duplicate material names
+    # in the shipped .material scripts.
+    ${HU_COREENGINE_ROOT}/DuplicateMaterialScriptCompilerListener.cpp
+
     # Also re-enabled: RaceCamera.cpp/.h and GameView.cpp/.h were previously
     # excluded for a SEPARATE reason from the GUI/Sound taint above -- real
     # Ogre 1.7->14 Camera API breakage (Ogre::Camera's nodeless positioning
@@ -648,6 +654,7 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/GameStateManager.h
     ${HU_COREENGINE_ROOT}/RepresentationManager.h
     ${HU_COREENGINE_ROOT}/Application.h
+    ${HU_COREENGINE_ROOT}/DuplicateMaterialScriptCompilerListener.h
 
     # TODO(modernize): still excluded, but NOT for ZoidCom/Networking reasons
     # anymore -- the shim resolves that taint. Two independent kinds of

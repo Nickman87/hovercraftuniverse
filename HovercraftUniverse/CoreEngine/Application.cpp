@@ -111,6 +111,15 @@ void Application::createRoot() {
 	// OgreOverlaySystem.h include comment in Application.h -- must be
 	// constructed with Root created but not yet initialised.
 	mOverlaySystem = new Ogre::OverlaySystem();
+
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+	// DuplicateMaterialScriptCompilerListener.h include comment in
+	// Application.h. Installed here, right after Root (and therefore
+	// ScriptCompilerManager) exists but before defineResources()/
+	// initializeResourceGroups() parse a single script, so it covers every
+	// .material script Ogre compiles -- both at startup and for each
+	// race's "Track" resource group.
+	DuplicateMaterialScriptCompilerListener::install();
 }
 
 void Application::defineResources() {

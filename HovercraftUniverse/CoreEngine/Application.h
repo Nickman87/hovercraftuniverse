@@ -11,6 +11,11 @@
 // MouseVisualisation's ctor and every GUI overlay) returns null and the
 // first overlay created access-violates.
 #include <OgreOverlaySystem.h>
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+// DuplicateMaterialScriptCompilerListener.h comment -- installs a
+// ScriptCompilerListener that restores Ogre 1.7's first-definition-wins
+// handling of the shipped .material scripts' duplicate material names.
+#include "DuplicateMaterialScriptCompilerListener.h"
 #include "EntityManager.h"
 #include "InputManager.h"
 #include "GameStateManager.h"
