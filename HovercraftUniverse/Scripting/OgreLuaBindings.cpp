@@ -146,15 +146,44 @@ namespace HovUni {
 		];
 	}
 
+	// Camera::setPosition()/lookAt() (and friends) are no longer members of
+	// Ogre::Camera in modern Ogre -- they only exist when the engine is
+	// built with the (off by default, deprecated) OGRE_NODELESS_POSITIONING
+	// option (see OgreCamera.h). The supported modern idiom is to position
+	// the camera's parent SceneNode instead (docs/porting/ogre-api-gap.md).
+	// These free functions preserve the exact Lua-visible API (setPosition/
+	// lookAt taking a Vector3 or 3 Reals) by forwarding to the camera's
+	// parent scene node; luabind supports binding free functions taking the
+	// bound type as their first parameter as if they were member functions.
+	static void Camera_setPosition(Camera* camera, const Vector3& pos) {
+		if (SceneNode* node = camera->getParentSceneNode()) {
+			node->setPosition(pos);
+		}
+	}
+
+	static void Camera_setPositionXYZ(Camera* camera, Real x, Real y, Real z) {
+		Camera_setPosition(camera, Vector3(x, y, z));
+	}
+
+	static void Camera_lookAt(Camera* camera, const Vector3& targetPoint) {
+		if (SceneNode* node = camera->getParentSceneNode()) {
+			node->lookAt(targetPoint, Node::TS_WORLD);
+		}
+	}
+
+	static void Camera_lookAtXYZ(Camera* camera, Real x, Real y, Real z) {
+		Camera_lookAt(camera, Vector3(x, y, z));
+	}
+
 	void OgreLuaBindings::bindCamera() {
 		lua_State* L = mLuaState;
 		module(L)
 		[
 			class_<Camera>("Camera")
-			.def("setPosition", (void(Camera::*)(const Vector3&))&Camera::setPosition)
-			.def("setPosition", (void(Camera::*)(Real,Real,Real))&Camera::setPosition)
-			.def("lookAt", (void(Camera::*)(const Vector3&))&Camera::lookAt)
-			.def("lookAt", (void(Camera::*)(Real,Real,Real))&Camera::lookAt)
+			.def("setPosition", &Camera_setPosition)
+			.def("setPosition", &Camera_setPositionXYZ)
+			.def("lookAt", &Camera_lookAt)
+			.def("lookAt", &Camera_lookAtXYZ)
 			.def("setNearClipDistance", &Camera::setNearClipDistance)
 			.def("setFarClipDistance", &Camera::setFarClipDistance)
 		];

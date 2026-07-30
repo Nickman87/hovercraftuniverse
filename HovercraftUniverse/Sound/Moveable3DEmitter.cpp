@@ -3,6 +3,8 @@
 #include "SoundManager.h"
 
 #include <OgreRoot.h>
+#include <OgreLogManager.h>
+#include <iostream>
 
 namespace HovUni {
 	const Ogre::String Moveable3DEmitter::msPrefix = "Moveable3DEmitter :: ";

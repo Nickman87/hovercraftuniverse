@@ -3,7 +3,7 @@
 #include "EntityManager.h"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/thread/thread.hpp>
-#include <boost/thread/xtime.hpp>
+#include <boost/chrono.hpp>
 #include <OgreLogManager.h>
 
 namespace HovUni {
@@ -37,11 +37,11 @@ void HUServerThread::operator()() {
 		//Ogre::LogManager::getSingleton().getDefaultLog()->stream() << "Processing server core";
 		mServerCore->process((int) since.total_milliseconds());
 
-		// Sleep
-		boost::xtime xt;
-        boost::xtime_get(&xt, boost::TIME_UTC);
-        xt.nsec += 1000000;
-        boost::thread::sleep(xt);
+		// Sleep. boost::xtime/boost::thread::sleep(xtime) were removed from
+		// modern Boost (deprecated years ago in favor of
+		// boost::this_thread::sleep_for); this preserves the original 1ms
+		// sleep using the modern chrono-based API.
+		boost::this_thread::sleep_for(boost::chrono::milliseconds(1));
 	}
 
 

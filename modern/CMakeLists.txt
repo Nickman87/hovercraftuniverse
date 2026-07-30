@@ -467,6 +467,85 @@ target_link_libraries(hu_coreengine PUBLIC
     Boost::thread
 )
 
+# --- hu_sound --------------------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/Sound/*.cpp/.h -- the
+# faithful VC9 conversion tracked by HovercraftUniverse/Sound/CMakeLists.txt
+# (source list mirrored from there; that file is NOT modified). FMOD Ex is a
+# prebuilt VC9-era library (HovercraftUniverse/dependencies/FMOD) exposing a
+# C API (the C++ classes in fmod.hpp/fmod_event.hpp are thin inline wrappers
+# over extern "C" functions), so its VC9 import libs (fmodex_vc.lib,
+# fmod_event.lib) link fine against v143 -- verified empirically with a
+# throwaway test executable (FMOD::System_Create + System::getVersion) built
+# in the build tree; see docs/porting/ for the writeup. No shim needed.
+set(HU_SOUND_ROOT ${HU_ROOT}/Sound)
+
+add_library(hu_sound STATIC
+    ${HU_SOUND_ROOT}/Moveable3DEmitter.cpp
+    ${HU_SOUND_ROOT}/SoundManager.cpp
+    ${HU_SOUND_ROOT}/Moveable3DEmitter.h
+    ${HU_SOUND_ROOT}/SoundManager.h
+)
+
+target_include_directories(hu_sound PUBLIC
+    ${HU_SOUND_ROOT}
+    ${HU_ROOT}/dependencies/FMOD/includes
+)
+
+target_compile_definitions(hu_sound PRIVATE
+    WIN32
+    _LIB
+    _MBCS
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+
+target_link_libraries(hu_sound PUBLIC
+    OgreMain
+    ${HU_ROOT}/dependencies/FMOD/lib/fmodex_vc.lib
+    ${HU_ROOT}/dependencies/FMOD/lib/fmod_event.lib
+)
+
+# --- Lua 5.1 + LuaBind (third_party) ---------------------------------------
+# Vendored (FetchContent-built) dependencies for hu_scripting below. See
+# docs/porting/lua-luabind.md and third_party/CMakeLists.txt (owned by this
+# porting effort, not a port of anything under HovercraftUniverse/) for the
+# full rationale: vcpkg's `lua` port is 5.5 (source-incompatible with this
+# game's Lua-5.1-era scripts/LuaBind), and there is no vcpkg port for LuaBind
+# at all. Provides hu_lua and hu_luabind targets.
+add_subdirectory(${CMAKE_SOURCE_DIR}/../third_party third_party)
+
+# --- hu_scripting ------------------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/Scripting/*.cpp/.h --
+# the faithful VC9 conversion tracked by HovercraftUniverse/Scripting/CMakeLists.txt
+# (source list mirrored from there; that file is NOT modified). Builds
+# against hu_lua/hu_luabind above instead of the original vendored
+# dependencies/lua, dependencies/luabind directories.
+set(HU_SCRIPTING_ROOT ${HU_ROOT}/Scripting)
+
+add_library(hu_scripting STATIC
+    ${HU_SCRIPTING_ROOT}/OgreLuaBindings.cpp
+    ${HU_SCRIPTING_ROOT}/ScriptWrapper.cpp
+    ${HU_SCRIPTING_ROOT}/OgreLuaBindings.h
+    ${HU_SCRIPTING_ROOT}/ScriptWrapper.h
+)
+
+target_include_directories(hu_scripting PUBLIC
+    ${HU_SCRIPTING_ROOT}
+)
+
+target_compile_definitions(hu_scripting PRIVATE
+    WIN32
+    _MBCS
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+
+target_link_libraries(hu_scripting PUBLIC
+    hu_lua
+    hu_luabind
+    OgreMain
+)
+
 # --- hu_havok_compat -----------------------------------------------------
 # API-compatible, from-scratch replacement for the dead closed-source Havok
 # Physics 6.6 SDK (compat/havok/**, owned by this porting effort -- not a
@@ -567,6 +646,18 @@ add_library(hu_game_physics STATIC
     ${HU_GAMEPHYSICS_ROOT}/VisualEvent.cpp
     ${HU_GAMEPHYSICS_ROOT}/VisualEventParser.cpp
 
+    # Re-enabled now that hu_sound/hu_scripting exist (previously blocked
+    # purely by Sound/Scripting #include taint; verified to compile clean):
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftAIController.cpp
+    ${HU_GAMEPHYSICS_ROOT}/ServerLoader.cpp
+
+    # Re-enabled: boost::xtime/boost::thread::sleep(xtime) (removed from
+    # modern Boost) replaced in place with
+    # boost::this_thread::sleep_for(boost::chrono::milliseconds(1)) --
+    # same 1ms sleep, modern chrono-based API. See docs/porting/ for detail.
+    ${HU_GAMEPHYSICS_ROOT}/PathRecorder.cpp
+    ${HU_GAMEPHYSICS_ROOT}/HUServerThread.cpp
+
     # EXCLUDED (A) -- transitively #include GUIManager.h / SoundManager.h /
     # Scripting (lua.h, luabind.hpp, OgreLuaBindings.h), none of which are
     # ported yet. Left on disk untouched; re-add once their blocking
@@ -575,25 +666,13 @@ add_library(hu_game_physics STATIC
     #   HUApplication.cpp            -- GUI, Sound
     #   HUClient.cpp                 -- GUI, Sound, Scripting
     #   HUD.cpp                      -- GUI
-    #   HovercraftAIController.cpp   -- Scripting
     #   HovercraftRepresentation.cpp -- GUI, Sound
     #   InGameState.cpp              -- GUI, Sound
     #   LobbyGUI.cpp                 -- GUI
     #   LobbyState.cpp               -- GUI, Sound
     #   MainMenu.cpp                 -- GUI
     #   MainMenuState.cpp            -- GUI, Sound
-    #   ServerLoader.cpp             -- Scripting
     #   main.cpp                     -- GUI, Sound (WinMain entry point itself)
-    #   ClientLoader.cpp             -- transitively Sound-tainted: includes
-    #                                    HovercraftRepresentation.h, which
-    #                                    #includes <Moveable3DEmitter.h>
-    #                                    (angle-bracket include, missed by
-    #                                    the taint scan above, which only
-    #                                    followed quoted includes) --
-    #                                    HovercraftUniverse/Sound/Moveable3DEmitter.h,
-    #                                    Sound project, not ported.
-    #   HovercraftLoader.cpp         -- same Moveable3DEmitter.h/Sound taint,
-    #                                    via the same #include chain.
     #   ClientConnectThread.cpp      -- ClientConnectThread.h #includes
     #                                    "ConnectListener.h", which only
     #                                    exists under HovercraftUniverse/GUI/
@@ -621,18 +700,41 @@ add_library(hu_game_physics STATIC
     #                       class as docs/porting/ogre-api-gap.md), just not
     #                       caught by that document's original pass because
     #                       this file was Havok-blocked at the time.
-    #   PathRecorder.cpp,
-    #   HUServerThread.cpp -- both call `boost::xtime`/`boost::TIME_UTC`
-    #                          (removed from modern Boost;
-    #                          `boost::thread::sleep(xtime)` was deprecated
-    #                          and dropped years ago in favor of
-    #                          `boost::this_thread::sleep_for`) -- a
-    #                          boost-version-api-gap issue, unrelated to
-    #                          Havok. (HUServerThread.cpp's own dedicated-
-    #                          server tick loop calls this to pace itself;
-    #                          HavokThread.cpp, which drives the physics
-    #                          step loop itself, uses plain Win32 Sleep()
-    #                          instead and is unaffected.)
+    #
+    # (PathRecorder.cpp/HUServerThread.cpp were also excluded here for
+    # boost::xtime/boost::TIME_UTC breakage -- fixed in place, see above;
+    # both now build clean.)
+    #
+    # EXCLUDED (C) -- were assumed Sound-only-tainted before this task (via
+    # <Moveable3DEmitter.h>, see the ClientLoader.cpp/HovercraftLoader.cpp
+    # note that used to live under EXCLUDED (A) above), but actually
+    # compiling each against hu_sound/hu_scripting shows they are ALSO
+    # blocked by real, independent Ogre-api-gap breakage that hu_sound does
+    # not touch -- confirmed empirically by attempting the compile:
+    #   ClientLoader.cpp    -- Ogre::SceneManager::setShadowTextureCasterMaterial/
+    #                          setShadowTextureReceiverMaterial now take a
+    #                          MaterialPtr, not a name string;
+    #                          Ogre::DefaultShadowCameraSetup/FocusedShadowCameraSetup/
+    #                          LiSPSMShadowCameraSetup/PlaneOptimalShadowCameraSetup
+    #                          have all been renamed/moved in modern Ogre;
+    #                          Ogre::Light::setPosition() no longer exists
+    #                          (same SceneNode-based idiom change as
+    #                          Ogre::Camera, see OgreLuaBindings.cpp's
+    #                          Camera_setPosition/Camera_lookAt fix for the
+    #                          general pattern -- not applied here, out of
+    #                          scope for this task).
+    #   HovercraftLoader.cpp -- includes GameView.h, which includes
+    #                          CoreEngine/RaceCamera.h, which calls
+    #                          Ogre::Camera::setPosition/setDirection --
+    #                          exactly the already-documented RaceCamera.cpp
+    #                          Ogre-api-gap breakage above (hu_coreengine's
+    #                          EXCLUDED (A) list); additionally calls
+    #                          Ogre::Animation/TransformKeyFrame APIs that no
+    #                          longer resolve the same way. Both files need a
+    #                          real Ogre 1.7->14 migration pass (shadow
+    #                          camera setups, Light/Camera node-based
+    #                          positioning, Animation/KeyFrame API), not a
+    #                          Sound/Scripting fix -- out of scope here.
 )
 
 target_include_directories(hu_game_physics PUBLIC
@@ -706,6 +808,8 @@ target_link_libraries(hu_game_physics PUBLIC
     hu_ogremax
     hu_utils
     hu_exceptions
+    hu_sound
+    hu_scripting
     OgreMain
     OgreOverlay
     Boost::thread

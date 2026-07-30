@@ -9,6 +9,8 @@ extern "C" {
 #include "luabind/luabind.hpp"
 #include <OgreRoot.h>
 #include <OgreEntity.h>
+#include <OgreCamera.h>
+#include <OgreSceneNode.h>
 
 namespace HovUni {
 	/**
@@ -43,37 +45,37 @@ namespace HovUni {
 		/**
 		*	Add class binding for Ogre::Vector3 to the Lua State.
 		*/
-		void OgreLuaBindings::bindVector3();
+		void bindVector3();
 
 		/**
 		*	Add class binding for Ogre::Vector3 to the Lua State.
 		*/
-		void OgreLuaBindings::bindVector4();
+		void bindVector4();
 
 		/**
 		*	Add class binding for Ogre::ColourValue to the Lua State.
 		*/
-		void OgreLuaBindings::bindColourValue();
+		void bindColourValue();
 
 		/**
 		*	Add class binding for Ogre::Entity to the Lua State.
 		*/
-		void OgreLuaBindings::bindEntity();
+		void bindEntity();
 
 		/**
 		*	Add class binding for Ogre::SceneNode to the Lua State.
 		*/
-		void OgreLuaBindings::bindSceneNode();
+		void bindSceneNode();
 
 		/**
 		*	Add class binding for Ogre::Camera to the Lua State.
 		*/
-		void OgreLuaBindings::bindCamera();
+		void bindCamera();
 
 		/**
 		*	Convenience function that adds all the other class bindings in this class.
 		*/
-		void OgreLuaBindings::bindLua();
+		void bindLua();
 	};
 }
 
