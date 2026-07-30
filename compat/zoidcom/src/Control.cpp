@@ -16,6 +16,8 @@
 //   NODE_REMOVE (kind 4)       authority -> proxy: a node went away
 //   NODE_OWNER (kind 5)        authority -> proxy: role promotion/demotion
 //   NODE_EVENT (kind 6)        both ways: a ZCom_Node::sendEvent* payload
+//   CONN_REQUEST (kind 7)      client -> server: the ZCom_Connect() request bitstream
+//   CONN_REPLY (kind 8)        server -> client: accept flag + ZCom_cbConnectionRequest()'s reply bitstream
 // See docs/porting/phase-b-replication.md §4 for the full wire table.
 //
 // IMPORTANT (see phase-b-replication.md §6.1): the node registry and the
@@ -27,26 +29,50 @@
 // to the server's own ZCom_Node object -- which would appear to work in
 // single-player and fail utterly over a real network.
 //
-// KNOWN SEMANTIC GAP (documented in docs/porting/zoidcom-compat.md):
-// real ZoidCom's connection handshake is app-negotiated -- the server's
-// ZCom_cbConnectionRequest() can reject a connection *before* the client
-// is told it's connected. ENet's handshake is transport-level and
-// completes before any application code runs, so:
-//   - the client's ZCom_cbConnectResult() fires as soon as the ENet
-//     handshake completes, always with eZCom_ConnAccepted (there is no
-//     way to carry an app-level "denied" decision back through ENet's
-//     connect handshake without a round trip we don't yet implement);
-//   - the server's ZCom_cbConnectionRequest() is called immediately after
-//     accepting the transport connection, with an always-empty request
-//     bitstream (ENet's connect() call only carries a single 32-bit
-//     integer, not an arbitrary bitstream) -- if the callback returns
-//     false, the shim disconnects the peer immediately, which the client
-//     sees as an immediate ZCom_cbConnectionClosed() *after* it already
-//     saw ZCom_cbConnectResult(eZCom_ConnAccepted). Real ZoidCom would
-//     never have told the client it was accepted in this case.
-// TODO(phaseB): a proper app-level handshake (send request/reply as the
-// first reliable packets and gate ZCom_cbConnectResult on the reply)
-// would close this gap.
+// APPLICATION-LEVEL CONNECT HANDSHAKE (Phase B, connect-handshake pass):
+// real ZoidCom's connection handshake is app-negotiated: the client's
+// request bitstream and the server's reply bitstream both actually travel
+// over the wire, and the client's ZCom_cbConnectResult() only fires once
+// the server's decision is known. ENet's own connect handshake is
+// transport-level only (a bare 32-bit integer, no arbitrary bitstream) and
+// completes before any application code runs, so this shim layers the app
+// handshake on top of it as ordinary reliable-ordered packets on channel 0:
+//   1. ENET_EVENT_TYPE_CONNECT fires for the client's outgoing peer. The
+//      client does NOT yet call ZCom_cbConnectResult(); instead it sends
+//      the ZCom_Connect()-supplied request bitstream as CONN_REQUEST and
+//      records the connection as awaiting a reply
+//      (ZCom_Control_Private::awaiting_connect_reply).
+//   2. The server accepts the transport connection (ENET_EVENT_TYPE_CONNECT,
+//      unsolicited side) but likewise defers ZCom_cbConnectionRequest()
+//      until CONN_REQUEST actually arrives (recorded in
+//      awaiting_connect_request) -- the callback no longer runs against a
+//      permanently-empty stream.
+//   3. On CONN_REQUEST receipt, the server calls ZCom_cbConnectionRequest()
+//      for real, then transmits the accept flag plus whatever the callback
+//      wrote into `reply` as CONN_REPLY. If accepted, unique-authority-node
+//      linking + ZCom_cbConnectionSpawned() proceed exactly as before,
+//      *after* CONN_REPLY has been queued, so CONN_REPLY is always ahead of
+//      any NODE_CREATE/NODE_LINK_UNIQUE traffic on the same ordered channel.
+//      If denied, the peer is closed with enet_peer_disconnect_later() so
+//      CONN_REPLY is flushed before the transport connection actually goes
+//      away.
+//   4. On CONN_REPLY receipt, the client calls ZCom_cbConnectResult() with
+//      eZCom_ConnAccepted or eZCom_ConnDenied (matching the accept flag)
+//      and the real reply bitstream, then clears awaiting_connect_reply.
+//   Both sides additionally refuse to dispatch any other message kind for a
+//   connection still in awaiting_connect_request/awaiting_connect_reply
+//   (see ZCom_processInput()'s ENET_EVENT_TYPE_RECEIVE case) as a defensive
+//   backstop, even though channel-0 ordering already guarantees the
+//   handshake packets precede node-linking traffic in practice.
+//
+// Remaining approximation: a denied connection still produces a normal
+// ZCom_cbConnectionClosed() once ENet finishes tearing down the transport
+// peer (real ZoidCom likely never reports a "closed" connection that was
+// never reported "spawned" in the first place). Callers should treat
+// eZCom_ConnDenied on the client, or a false return from
+// ZCom_cbConnectionRequest() on the server, as the authoritative signal;
+// the follow-up ZCom_cbConnectionClosed() is bookkeeping noise, not a
+// second, independent rejection notification.
 //
 // TODO(phaseB) stubs: Zoidlevels/ZCom_requestZoidMode, LAN discovery
 // (ZCom_Discover/ZCom_setDiscoverListener), lag/loss simulation.
@@ -66,6 +92,8 @@ const zU8 kMsgNodeLinkUnique  = 3;
 const zU8 kMsgNodeRemove      = 4;
 const zU8 kMsgNodeOwner       = 5;
 const zU8 kMsgNodeEvent       = 6;
+const zU8 kMsgConnRequest     = 7;  // client -> server: the ZCom_Connect() request bitstream
+const zU8 kMsgConnReply       = 8;  // server -> client: accept flag + ZCom_cbConnectionRequest()'s reply bitstream
 
 const size_t kMaxPeers = 64;
 const size_t kChannelCount = 2;
@@ -105,12 +133,35 @@ public:
     ZCom_NodeID pending_dynamic_netid;
     ZCom_ConnID pending_dynamic_conn;
 
+    // --- application-level connect handshake (see file header) -------------
+    // Client side: the ZCom_Connect()-supplied request bitstream, held from
+    // ZCom_Connect() until the ENet transport handshake completes and it can
+    // actually be sent as CONN_REQUEST.
+    std::map<ZCom_ConnID, ZCom_BitStream*> pending_connect_request;
+    // Client side: connections that have sent CONN_REQUEST and are waiting
+    // for the server's CONN_REPLY before ZCom_cbConnectResult() may fire.
+    std::set<ZCom_ConnID> awaiting_connect_reply;
+    // Server side: connections whose ENet transport handshake completed but
+    // whose CONN_REQUEST hasn't arrived yet, so ZCom_cbConnectionRequest()
+    // hasn't run and the connection isn't spawned/usable yet.
+    std::set<ZCom_ConnID> awaiting_connect_request;
+
     ZCom_Control_Private()
         : host(NULL), control_id(0), next_conn_id(1),
           next_network_id(1), dispatching_dynamic_request(false),
           pending_dynamic_netid(0), pending_dynamic_conn(ZCom_Invalid_ID) {
         memset(&zero_stats, 0, sizeof(zero_stats));
         class_names.push_back(""); // ZCom_Invalid_ID placeholder
+    }
+
+    ~ZCom_Control_Private() {
+        // Free any request bitstreams for connects that never reached
+        // ENET_EVENT_TYPE_CONNECT (e.g. Shutdown() before the transport
+        // handshake finished) -- ZCom_Connect() handed ownership to us.
+        for (std::map<ZCom_ConnID, ZCom_BitStream*>::iterator it = pending_connect_request.begin();
+             it != pending_connect_request.end(); ++it) {
+            delete it->second;
+        }
     }
 };
 
@@ -234,12 +285,11 @@ ZCom_ConnID ZCom_Control::ZCom_Connect(const ZCom_Address& _target, ZCom_BitStre
     m_priv->conn_addr[id] = _target;
     memset(&m_priv->stats[id], 0, sizeof(ZCom_ConnStats));
 
-    if (_request) {
-        zshim::todoPhaseBOnce("ZCom_Control::ZCom_Connect(request-data)",
-            "the connection-request bitstream is not transmitted (ENet's connect handshake carries no application payload); "
-            "ZCom_cbConnectionRequest() on the remote side always sees an empty request stream");
-        delete _request;
-    }
+    // ENet's own connect handshake carries no application payload, so the
+    // request bitstream (may be NULL) is held here and actually transmitted
+    // as CONN_REQUEST once ENET_EVENT_TYPE_CONNECT confirms the transport
+    // connection exists -- see ZCom_processInput() and this file's header.
+    m_priv->pending_connect_request[id] = _request;
     return id;
 }
 
@@ -554,11 +604,32 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
             case ENET_EVENT_TYPE_CONNECT: {
                 std::map<ENetPeer*, ZCom_ConnID>::iterator existing = m_priv->peer_to_conn.find(event.peer);
                 if (existing != m_priv->peer_to_conn.end()) {
-                    // Our own outgoing ZCom_Connect() completed.
-                    ZCom_BitStream reply;
-                    ZCom_cbConnectResult(existing->second, eZCom_ConnAccepted, reply);
+                    // Our own outgoing ZCom_Connect() completed at the
+                    // transport level. Do NOT call ZCom_cbConnectResult()
+                    // yet -- send the app-level request and wait for the
+                    // server's CONN_REPLY (see file header).
+                    ZCom_ConnID id = existing->second;
+                    ZCom_BitStream* request = NULL;
+                    std::map<ZCom_ConnID, ZCom_BitStream*>::iterator req_it = m_priv->pending_connect_request.find(id);
+                    if (req_it != m_priv->pending_connect_request.end()) {
+                        request = req_it->second;
+                        m_priv->pending_connect_request.erase(req_it);
+                    }
+
+                    ZCom_BitStream envelope;
+                    zU32 bits = request ? request->getBitCount() : 0;
+                    envelope.addInt(bits, 32);
+                    if (bits) envelope.addBitStream(request, true);
+                    delete request;
+
+                    sendEnvelope(event.peer, kMsgConnRequest, envelope);
+                    m_priv->awaiting_connect_reply.insert(id);
                 } else {
-                    // Unsolicited incoming connection.
+                    // Unsolicited incoming connection. Bookkeeping is set up
+                    // immediately so packets can be routed, but
+                    // ZCom_cbConnectionRequest() is deferred until the
+                    // client's CONN_REQUEST actually arrives (see file
+                    // header and the kMsgConnRequest case below).
                     ZCom_ConnID id = m_priv->next_conn_id++;
                     m_priv->conn_to_peer[id] = event.peer;
                     m_priv->peer_to_conn[event.peer] = id;
@@ -570,30 +641,7 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                     m_priv->conn_addr[id] = addr;
                     memset(&m_priv->stats[id], 0, sizeof(ZCom_ConnStats));
 
-                    ZCom_BitStream request, reply;
-                    bool accept = ZCom_cbConnectionRequest(id, request, reply);
-                    if (accept) {
-                        // Phase B: link any locally-registered authority
-                        // *unique* nodes to this newly-accepted connection
-                        // BEFORE notifying the game via
-                        // ZCom_cbConnectionSpawned() -- so that if the game
-                        // synchronously calls setOwner() in response (e.g.
-                        // Lobby::onConnect() granting admin), the connection
-                        // is already linked and the promotion isn't silently
-                        // dropped. See phase-b-replication.md §3.1/§6.1.
-                        for (std::map<ZCom_ClassID, ZCom_Node*>::iterator uit = m_priv->unique_nodes_by_class.begin();
-                             uit != m_priv->unique_nodes_by_class.end(); ++uit) {
-                            if (uit->second->getRole() == eZCom_RoleAuthority) {
-                                uit->second->ZCom_shimQueueAnnounce(id);
-                            }
-                        }
-                        ZCom_cbConnectionSpawned(id);
-                    } else {
-                        m_priv->conn_to_peer.erase(id);
-                        m_priv->peer_to_conn.erase(event.peer);
-                        m_priv->conn_addr.erase(id);
-                        enet_peer_disconnect_now(event.peer, 0);
-                    }
+                    m_priv->awaiting_connect_request.insert(id);
                 }
                 break;
             }
@@ -604,7 +652,80 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                     zU16 payload_len = (zU16) (event.packet->dataLength - 1);
                     ZCom_ConnID from_conn = conn_it->second;
 
-                    if (kind == kMsgRawData) {
+                    // The connect handshake (CONN_REQUEST/CONN_REPLY) is
+                    // always processed. Everything else is refused while the
+                    // handshake for this connection hasn't completed yet --
+                    // a defensive backstop; channel-0 ordering already
+                    // guarantees our own client/server never sends anything
+                    // else before the handshake finishes. See file header.
+                    bool handshake_pending = m_priv->awaiting_connect_request.count(from_conn) != 0 ||
+                                              m_priv->awaiting_connect_reply.count(from_conn) != 0;
+
+                    if (kind == kMsgConnRequest) {
+                        // Server side: the client's ZCom_Connect() request
+                        // has arrived. Run the real ZCom_cbConnectionRequest()
+                        // callback now (instead of at transport-connect time
+                        // with a permanently-empty stream) and transmit its
+                        // verdict + reply bitstream back as CONN_REPLY.
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* request = bits ? envelope.getBitStream(bits, true) : new ZCom_BitStream();
+
+                        ZCom_BitStream reply;
+                        bool accept = ZCom_cbConnectionRequest(from_conn, *request, reply);
+                        delete request;
+
+                        ZCom_BitStream reply_envelope;
+                        reply_envelope.addBool(accept);
+                        zU32 reply_bits = reply.getBitCount();
+                        reply_envelope.addInt(reply_bits, 32);
+                        if (reply_bits) reply_envelope.addBitStream(&reply, true);
+                        sendEnvelope(event.peer, kMsgConnReply, reply_envelope);
+
+                        m_priv->awaiting_connect_request.erase(from_conn);
+
+                        if (accept) {
+                            // Phase B: link any locally-registered authority
+                            // *unique* nodes to this newly-accepted connection
+                            // BEFORE notifying the game via
+                            // ZCom_cbConnectionSpawned() -- so that if the game
+                            // synchronously calls setOwner() in response (e.g.
+                            // Lobby::onConnect() granting admin), the connection
+                            // is already linked and the promotion isn't silently
+                            // dropped. See phase-b-replication.md §3.1/§6.1.
+                            for (std::map<ZCom_ClassID, ZCom_Node*>::iterator uit = m_priv->unique_nodes_by_class.begin();
+                                 uit != m_priv->unique_nodes_by_class.end(); ++uit) {
+                                if (uit->second->getRole() == eZCom_RoleAuthority) {
+                                    uit->second->ZCom_shimQueueAnnounce(from_conn);
+                                }
+                            }
+                            ZCom_cbConnectionSpawned(from_conn);
+                        } else {
+                            // Let CONN_REPLY flush before the transport
+                            // connection actually goes away; ordinary
+                            // ENET_EVENT_TYPE_DISCONNECT cleanup handles the
+                            // rest (see file header's noted approximation).
+                            enet_peer_disconnect_later(event.peer, 0);
+                        }
+                    } else if (kind == kMsgConnReply) {
+                        // Client side: the server's verdict on our
+                        // CONN_REQUEST has arrived. Only now do we call
+                        // ZCom_cbConnectResult(), with the real reply stream
+                        // and the correct accept/deny result.
+                        ZCom_BitStream envelope;
+                        envelope.Deserialize((char*) event.packet->data + 1, payload_len);
+                        bool accept = envelope.getBool();
+                        zU32 bits = envelope.getInt(32);
+                        ZCom_BitStream* reply = bits ? envelope.getBitStream(bits, true) : new ZCom_BitStream();
+
+                        m_priv->awaiting_connect_reply.erase(from_conn);
+                        ZCom_cbConnectResult(from_conn, accept ? eZCom_ConnAccepted : eZCom_ConnDenied, *reply);
+                        delete reply;
+                    } else if (handshake_pending) {
+                        zshim::todoPhaseBOnce("ZCom_Control::ZCom_processInput(pre-handshake-traffic)",
+                            "received a non-handshake message kind before the connect handshake completed for this connection; dropped");
+                    } else if (kind == kMsgRawData) {
                         ZCom_BitStream data;
                         data.Deserialize((char*) event.packet->data + 1, payload_len);
                         ZCom_cbDataReceived(from_conn, data);
@@ -717,6 +838,13 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                     m_priv->conn_addr.erase(id);
                     m_priv->user_data.erase(id);
                     m_priv->stats.erase(id);
+                    m_priv->awaiting_connect_request.erase(id);
+                    m_priv->awaiting_connect_reply.erase(id);
+                    std::map<ZCom_ConnID, ZCom_BitStream*>::iterator pend_it = m_priv->pending_connect_request.find(id);
+                    if (pend_it != m_priv->pending_connect_request.end()) {
+                        delete pend_it->second;
+                        m_priv->pending_connect_request.erase(pend_it);
+                    }
                 }
                 break;
             }

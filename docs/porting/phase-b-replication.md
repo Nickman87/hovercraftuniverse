@@ -373,14 +373,18 @@ game depends on it completely.
   ([HUClient.cpp:88-119](../../HovercraftUniverse/HovercraftUniverse/HUClient.cpp)) reads its
   own unique id back out of `extra` and stores it as `mID`.
 
-The shim transmits neither, so the client reads an empty stream and gets `mID = 0`. Observed
-in a real two-process run: the server logs `[Lobby]: New player joined with id 20` while the
-client logs `My unique ID is 0`. Then
+The shim transmits neither, so the client reads an empty stream and gets `mID = 0`, as its
+own log line `My unique ID is 0` shows. Then
 [HUClient.cpp:163](../../HovercraftUniverse/HovercraftUniverse/HUClient.cpp):
 
 ```cpp
-mLobby->addPlayer(ent, ent->getConnID() == mID);   // 20 == 0 -> false
+mLobby->addPlayer(ent, ent->getConnID() == mID);   // real conn id == 0 -> false
 ```
+
+(An earlier draft of this section read the server's `[Lobby]: New player joined with id 20`
+as the other side of that comparison. It is not — that is `PlayerSettings::getID()`, a
+separate global player-ID counter. The compared values are `getConnID()` and `mID`; only
+`mID` being wrongly `0` matters.)
 
 files the client's **own** `PlayerSettings` as another player's. `Lobby::getOwnPlayer()`
 returns null, so `Lobby::isAdmin()` is false, so the admin-gated **Start button never
