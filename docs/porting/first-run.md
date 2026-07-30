@@ -541,3 +541,54 @@ linking. Two adjustments:
   So there is more working infrastructure to build on than assumed.
 - Add the lobby GUI resolution question as a possible blocker independent of
   workstreams C and D.
+
+### 9.5 The "single-player regression" is probably not a regression
+
+After the node-linking work landed, two clicks on Singleplayer produced **zero**
+new client log lines, where a click on the previous build had worked. That
+looked like a regression in the new shim code. On inspection it almost
+certainly is not, for a structural reason:
+
+**The client process has no `ZCom_Control` at all while the main menu is up.**
+The only client-side one is `HUClient`, and it is constructed inside
+`MainMenuState::onConnect` ([MainMenuState.cpp:27](../../HovercraftUniverse/HovercraftUniverse/MainMenuState.cpp)),
+which only runs *after* a successful click. Before that the process holds only
+the `ZoidCom` global from `main.cpp`, unchanged from the previous build. So
+none of the new node-linking or event code is reachable at menu time, and it
+cannot be why the window ignored a click.
+
+Combined with the input findings in 9.2 -- relative-delta-only mouse handling, a
+window that resists foregrounding -- the parsimonious explanation is that the
+click simply did not register, twice. Not proven, but it is the explanation that
+does not require the impossible.
+
+This is now much less urgent regardless, because `--autoconnect` (commit
+`ad4a77c`) reaches the lobby without any click, in a genuine two-process
+configuration that is a *better* test than single-player anyway. Single-player
+does still need confirming eventually, since it is how the game is actually
+played -- but it is no longer blocking.
+
+**A real latent bug found while reading that path.** `DedicatedServer::parseIni`
+([CoreEngine/DedicatedServer.cpp](../../HovercraftUniverse/CoreEngine/DedicatedServer.cpp))
+resolves its data path *relative to the current working directory*:
+
+```cpp
+GetFullPathName(mDataPath.c_str(), MAX_PATH, buffer, lppPart);   // mDataPath = "data"
+BOOL success = SetCurrentDirectory(buffer);
+if (!success) { std::cerr << "Could not set working dir ..."; /*TODO Throw Exception*/ }
+```
+
+In single-player this runs *after* the client's `Application::parseIni` has
+already chdir'd into `data/`, so it tries to enter `data/data`, fails, and
+writes to `std::cerr` -- invisible in a GUI process without `--console`. It then
+carries on, and `engine_settings.cfg` still loads because the working directory
+is already correct by accident.
+
+So: harmless today, silent when it fails, and pre-existing 2010 behaviour
+(not introduced by the port). Left alone deliberately, but recorded because it
+is exactly the sort of thing that will be blamed for something later.
+
+Also worth knowing: `DedicatedServer::mConfig` and `mEngineSettings` are
+**static**, and `~DedicatedServer` does `mConfig->saveFile(); delete mConfig;`.
+Fragile in a process that hosts both a client and a server, which single-player
+does.
