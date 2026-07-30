@@ -59,8 +59,8 @@
 //     permanently stale value); non-MOSTRECENT sends reliable, once, on
 //     change only. mindelay throttles resends (but never suppresses a
 //     maxdelay-forced resend). This tracking is node-scoped, not
-//     per-connection -- see the file's "batch" comment below for why that
-//     is an acceptable simplification here.
+//     per-connection -- see the file's "batch" comment below for how a
+//     newly-linked connection is still brought up to date despite that.
 //   - addReplicator()-registered ZCom_ReplicatorBasic subclasses
 //     (OgreVector3_Replicator, OgreQuaternion_Replicator, String_Replicator)
 //     are driven the same tick: checkState() (which does its own dirty
@@ -106,12 +106,39 @@
 // Because dirty tracking is node-scoped rather than per-connection, a
 // MOSTRECENT item's maxdelay-driven resend timer is also node-scoped: with
 // more than one linked connection, all of them get resent to on the same
-// schedule rather than each independently. This does not create an
-// observable bug for anything in this codebase (a brand-new connection
-// gets the *current* value via its eZCom_EventInit snapshot, not by
-// waiting for the next dirty tick -- see phase-b-replication.md §3.2), but
-// is a documented divergence from a hypothetically bit-exact per-connection
-// implementation.
+// schedule rather than each independently. This is a documented divergence
+// from a hypothetically bit-exact per-connection implementation, but it is
+// harmless -- unlike the initial-sync gap below, nothing depends on the
+// *timing* of a resend, only on the value eventually arriving.
+//
+// Initial full sync (was: a real deadlock, not just a divergence). Node-
+// scoped dirty tracking used to mean a connection that linked to an already-
+// settled node -- one whose fields stopped changing before this connection
+// existed -- would never receive that value at all: it isn't dirty, so it's
+// never in the per-tick set, for any connection, ever. The assumption this
+// shim originally relied on to wave that away -- "a brand-new connection
+// gets the current value via its eZCom_EventInit snapshot instead" -- does
+// not hold in general: eZCom_EventInit is only raised when the *authority*
+// node has called setEventNotification(true, ...), and not every node does
+// (RaceState never does; see RaceState.cpp and docs/porting/
+// zoidcom-original-semantics.md). For such a node, real ZoidCom must still
+// have delivered its current state to a newly-linked connection some other
+// way -- that is the contract this shim was breaking, and it deadlocked
+// race startup (RaceState::mNumberPlayers never reaching a freshly-linked
+// client; see docs/porting/phase-b-replication.md).
+//
+// Fixed via LinkedConn::needs_full_sync (see ZCom_shimQueueAnnounce()): set
+// whenever a connection newly becomes relevant to an authority node, cleared
+// the first time ZCom_shimTickReplication() actually sends that connection
+// a full snapshot of every eligible item's *current* value (built by
+// ZCom_shimBuildFullReplSnapshot() below, independent of node-scoped dirty
+// state), sent reliably even for a ZCOM_REPFLAG_MOSTRECENT item (a dropped
+// initial state would recreate exactly this bug). The flag is only acted on
+// once the connection's LinkedConn::announced is also true, so the full
+// sync can never be sent ahead of the NODE_CREATE/NODE_LINK_UNIQUE that
+// makes the node exist remotely -- both ride the same reliable-ordered
+// channel, so send order is guaranteed. Already-synced connections continue
+// to receive only the per-tick dirty set, unaffected.
 //
 // Remaining TODO(phaseB) stubs, all logged once via zshim::todoPhaseBOnce():
 //   - addInterpolationInt/addInterpolationFloat (unused by any current call
@@ -165,6 +192,15 @@ struct ReplicationItem {
 struct LinkedConn {
     eZCom_NodeRole role;   // eZCom_RoleProxy or eZCom_RoleOwner, from this node's perspective
     bool announced;        // NODE_CREATE/NODE_LINK_UNIQUE already sent for this connection
+    // True until this connection has received a full snapshot of every
+    // eligible replication item's *current* value -- see
+    // ZCom_shimTickReplication()'s "full sync" pass. Set whenever this entry
+    // is created (i.e. whenever the connection newly becomes relevant to
+    // this node); cleared once the snapshot has actually been sent, which
+    // only happens after `announced` is true (so it can never race ahead of
+    // the NODE_CREATE/NODE_LINK_UNIQUE that makes the node exist remotely --
+    // see the file header's "Initial full sync" note).
+    bool needs_full_sync;
 };
 
 struct PendingEvent {
@@ -274,6 +310,212 @@ void forEachAdvancedReplicator(ZCom_Node_Private* p, Fn fn) {
             (item.replicator->getFlags() & ZCOM_REPLICATOR_ADVANCED)) {
             fn(static_cast<ZCom_ReplicatorAdvanced*>(item.replicator));
         }
+    }
+}
+
+} // namespace
+
+// --- Phase B steps 3-4: replication-tick item representation, and the
+// full-sync builder/sender (defined here, ahead of ZCom_shimQueueAnnounce()/
+// ZCom_shimFlushPendingAnnouncements() below, because the full sync is sent
+// from inside the flush -- see that function's comment for why it cannot
+// wait for ZCom_shimTickReplication() to run again). ---------------------
+namespace {
+
+// One replication item ready to fan out to a connection: either a dirty item
+// computed this tick (see ZCom_shimTickReplication()) or one entry of a full
+// initial-state snapshot (see ZCom_shimBuildFullReplSnapshot()). Owns
+// `payload` until the caller deletes it after sending.
+struct PendingReplItem {
+    zU16 index;
+    zU8 rules;
+    bool unreliable; // ZCOM_REPFLAG_MOSTRECENT -- see file header
+    bool intercept;  // ZCOM_REPFLAG_INTERCEPT -- gates outPreUpdateItem() below
+    ZCom_Replicator* replicator; // non-NULL only for a CustomReplicator item;
+                                 // outPreUpdateItem() needs this to hand to
+                                 // the interceptor. Primitive items have no
+                                 // such object -- see the file header's
+                                 // ZCOM_REPFLAG_INTERCEPT-on-primitive note.
+    ZCom_BitStream* payload;
+};
+
+// Builds a snapshot of every eligible replication item's CURRENT value,
+// regardless of node-scoped dirty state -- used once per connection that
+// still needs its initial full sync (see LinkedConn::needs_full_sync).
+// Read-only with respect to any item's shadow copy, last_send_time, or (for
+// a ZCom_ReplicatorBasic) its checkState()-tracked comparison value: it must
+// not suppress or duplicate a legitimate dirty detection on this or a later
+// tick. packData() alone is used for a Basic custom replicator instead of
+// checkState()+packData() -- packData() already emits the *full* current
+// value with no dependency on checkState() having just run (verified
+// against OgreVector3_Replicator::packData(), which reads straight from its
+// data pointer). Interpolated items and ZCom_ReplicatorAdvanced instances
+// are skipped, matching the dirty-tick switch in ZCom_shimTickReplication()
+// (neither participates in primitive/Basic replication).
+std::vector<PendingReplItem> ZCom_shimBuildFullReplSnapshot(ZCom_Node_Private* p) {
+    std::vector<PendingReplItem> snap;
+    snap.reserve(p->replication_items.size());
+
+    for (size_t i = 0; i < p->replication_items.size(); i++) {
+        ReplicationItem& item = p->replication_items[i];
+        ZCom_BitStream* payload = NULL;
+        ZCom_Replicator* rep_ptr = NULL;
+        zU8 rules = item.rules;
+        zU8 flags = item.flags;
+
+        switch (item.kind) {
+        case ReplicationItem::Int: {
+            zS32 cur = *(zS32*) item.ptr;
+            payload = new ZCom_BitStream();
+            if (item.sign) payload->addSignedInt(cur, item.bits);
+            else payload->addInt((zU32) cur, item.bits);
+            break;
+        }
+        case ReplicationItem::Bool: {
+            bool cur = *(bool*) item.ptr;
+            payload = new ZCom_BitStream();
+            payload->addBool(cur);
+            break;
+        }
+        case ReplicationItem::Float: {
+            zFloat cur = *(zFloat*) item.ptr;
+            payload = new ZCom_BitStream();
+            payload->addFloat(cur, item.bits);
+            break;
+        }
+        case ReplicationItem::String: {
+            const char* cur = (const char*) item.ptr;
+            payload = new ZCom_BitStream();
+            payload->addString(cur);
+            break;
+        }
+        case ReplicationItem::StringW: {
+            const wchar_t* cur = (const wchar_t*) item.ptr;
+            payload = new ZCom_BitStream();
+            payload->addStringW(cur);
+            break;
+        }
+        case ReplicationItem::CustomReplicator: {
+            if (!item.replicator || !(item.replicator->getFlags() & ZCOM_REPLICATOR_BASIC)) break;
+            ZCom_ReplicatorBasic* rb = static_cast<ZCom_ReplicatorBasic*>(item.replicator);
+            ZCom_ReplicatorSetup* setup = rb->getSetup();
+            // Refresh from the setup, same as the dirty-tick pass -- the
+            // setup is the authoritative source for a custom replicator.
+            rules = setup ? setup->getRules() : item.rules;
+            flags = setup ? setup->getFlags() : 0;
+            payload = new ZCom_BitStream();
+            rb->packData(payload);
+            rep_ptr = item.replicator;
+            break;
+        }
+        default: break;
+        }
+
+        if (!payload) continue;
+
+        PendingReplItem entry;
+        entry.index = (zU16) i;
+        entry.rules = rules;
+        entry.unreliable = false; // full sync always goes reliably -- see caller
+        entry.intercept = (flags & ZCOM_REPFLAG_INTERCEPT) != 0;
+        entry.replicator = rep_ptr;
+        entry.payload = payload;
+        snap.push_back(entry);
+    }
+    return snap;
+}
+
+// Sends `source` (either this tick's dirty set or a full-sync snapshot) to
+// one connection, honouring direction rules (AUTH_2_PROXY/AUTH_2_OWNER/
+// OWNER_2_AUTH per item), the ZCOM_REPFLAG_INTERCEPT/outPreUpdateItem() gate,
+// and outPreUpdate()/outPostUpdate() -- shared by ZCom_shimTickReplication()
+// (force_reliable=false, so a MOSTRECENT item still goes unreliable) and
+// ZCom_shimFlushPendingAnnouncements()'s full sync (force_reliable=true: a
+// dropped initial state would recreate the very bug this exists to fix).
+// Does not delete any `source[i].payload` -- the caller owns those.
+void ZCom_shimSendReplItemsToConn(ZCom_Node* node, ZCom_Node_Private* p, ZCom_ConnID conn,
+                                   eZCom_NodeRole remote_role,
+                                   const std::vector<PendingReplItem>& source,
+                                   bool force_reliable) {
+    if (source.empty()) return;
+
+    // outPreUpdate(): "Should return 'false' to prevent sending updates now,
+    // 'true' otherwise" -- a per-call, per-connection veto, not a permanent
+    // one (zoidcom_node_interceptors.h).
+    if (p->replication_interceptor && !p->replication_interceptor->outPreUpdate(node, conn, remote_role)) {
+        return;
+    }
+
+    ZCom_BitStream reliable_env, unreliable_env;
+    zU16 reliable_count = 0, unreliable_count = 0;
+    zU32 rep_bits = 0;
+
+    for (size_t i = 0; i < source.size(); i++) {
+        const PendingReplItem& item = source[i];
+        bool applies;
+        if (p->role == eZCom_RoleAuthority) {
+            bool to_proxy = (item.rules & ZCOM_REPRULE_AUTH_2_PROXY) != 0 && remote_role == eZCom_RoleProxy;
+            bool to_owner = (item.rules & ZCOM_REPRULE_AUTH_2_OWNER) != 0 && remote_role == eZCom_RoleOwner;
+            applies = to_proxy || to_owner;
+        } else {
+            applies = (item.rules & ZCOM_REPRULE_OWNER_2_AUTH) != 0;
+        }
+        if (!applies) continue;
+
+        // outPreUpdateItem(): "This callback only gets called if the
+        // replication item really is about to be updated now" -- matches
+        // `source` already being exactly the set of items being sent to
+        // this connection (dirty set, or the full snapshot for a
+        // newly-linked connection). Gated by ZCOM_REPFLAG_INTERCEPT per the
+        // flag's own doc. No current game code sets that flag, so the
+        // primitive-item (no ZCom_Replicator to pass) branch below is
+        // unreachable today but handled per the file header.
+        if (item.intercept && p->replication_interceptor) {
+            if (item.replicator) {
+                if (!p->replication_interceptor->outPreUpdateItem(node, conn, remote_role, item.replicator)) {
+                    continue;
+                }
+            } else {
+                zshim::todoPhaseBOnce("ZCom_Node::ZCom_shimSendReplItemsToConn(intercept-primitive)",
+                    "ZCOM_REPFLAG_INTERCEPT set on a primitive replication item; outPreUpdateItem() "
+                    "can't be called without a ZCom_Replicator instance to pass, sending the update "
+                    "unfiltered (unused by any current game code)");
+            }
+        }
+
+        // A full sync (force_reliable) must go reliably even for a
+        // ZCOM_REPFLAG_MOSTRECENT item -- a dropped initial state is
+        // exactly the failure this mechanism exists to fix (see file
+        // header).
+        bool unreliable_ok = item.unreliable && !force_reliable;
+        ZCom_BitStream& env = unreliable_ok ? unreliable_env : reliable_env;
+        zU16& count = unreliable_ok ? unreliable_count : reliable_count;
+        env.addInt(item.index, 16);
+        zU32 bits = item.payload->getBitCount();
+        env.addInt(bits, 16);
+        env.addBitStream(item.payload, true);
+        count++;
+        rep_bits += 32 + bits; // index + length fields, plus the payload itself
+    }
+
+    if (reliable_count > 0) {
+        ZCom_BitStream out;
+        out.addInt(reliable_count, 16);
+        out.addBitStream(&reliable_env, true);
+        p->control->ZCom_shimSendNodeReplBatch(conn, p->network_id, true, out);
+    }
+    if (unreliable_count > 0) {
+        ZCom_BitStream out;
+        out.addInt(unreliable_count, 16);
+        out.addBitStream(&unreliable_env, true);
+        p->control->ZCom_shimSendNodeReplBatch(conn, p->network_id, false, out);
+    }
+
+    // outPostUpdate(): only fires when something was actually included in
+    // this connection's update this call -- matches "The node has included
+    // it's update into the current packet."
+    if ((reliable_count > 0 || unreliable_count > 0) && p->replication_interceptor) {
+        p->replication_interceptor->outPostUpdate(node, conn, remote_role, rep_bits, 0, 0);
     }
 }
 
@@ -774,6 +1016,7 @@ void ZCom_Node::ZCom_shimQueueAnnounce(ZCom_ConnID _conn) {
     LinkedConn entry;
     entry.role = eZCom_RoleProxy;
     entry.announced = false;
+    entry.needs_full_sync = true;
     // Apply any setOwner() intent already recorded for _conn -- see
     // setOwner()'s comment. This is what makes setOwner() registration-order
     // independent: it may have been called long before this connection ever
@@ -818,6 +1061,25 @@ void ZCom_Node::ZCom_shimFlushPendingAnnouncements() {
         }
         entry.announced = true;
         noteConnectionLinkedEventInit(conn);
+
+        // Full initial sync: send it right here, immediately after the
+        // NODE_CREATE/NODE_LINK_UNIQUE just queued above, rather than
+        // waiting for the next ZCom_shimTickReplication() call -- see that
+        // function's comment for why the wait would be a real (if narrow)
+        // race: ZCom_processReplicators() runs before ZCom_processOutput()
+        // in the per-frame call order, so a dependent node announced in
+        // this same flush cycle (e.g. RacePlayer, right after RaceState via
+        // dependsOn()) could already be constructed and acted on
+        // client-side before a tick-deferred sync ever arrived. Sending it
+        // inline here guarantees it goes out on the wire immediately after
+        // the announcement, both reliable-ordered on the same channel, so
+        // order is preserved with no extra delay.
+        if (entry.needs_full_sync) {
+            std::vector<PendingReplItem> snapshot = ZCom_shimBuildFullReplSnapshot(m_priv);
+            ZCom_shimSendReplItemsToConn(this, m_priv, conn, entry.role, snapshot, /*force_reliable=*/true);
+            for (size_t s = 0; s < snapshot.size(); s++) delete snapshot[s].payload;
+            entry.needs_full_sync = false;
+        }
 
         eZCom_NodeRole role_for_conn = entry.role;
         forEachAdvancedReplicator(m_priv, [conn, role_for_conn](ZCom_ReplicatorAdvanced* rep) {
@@ -882,25 +1144,11 @@ eZCom_NodeRole ZCom_Node::ZCom_shimRemoteRoleFor(ZCom_ConnID _conn) const {
 }
 
 // --- Phase B steps 3-4: the replication tick --------------------------------
-
-namespace {
-
-// One dirty item computed this tick, ready to fan out to every connection
-// whose rule/role combination wants it. Owns `payload` until sent.
-struct PendingReplItem {
-    zU16 index;
-    zU8 rules;
-    bool unreliable; // ZCOM_REPFLAG_MOSTRECENT -- see file header
-    bool intercept;  // ZCOM_REPFLAG_INTERCEPT -- gates outPreUpdateItem() below
-    ZCom_Replicator* replicator; // non-NULL only for a CustomReplicator item;
-                                 // outPreUpdateItem() needs this to hand to
-                                 // the interceptor. Primitive items have no
-                                 // such object -- see the file header's
-                                 // ZCOM_REPFLAG_INTERCEPT-on-primitive note.
-    ZCom_BitStream* payload;
-};
-
-} // namespace
+// (PendingReplItem, ZCom_shimBuildFullReplSnapshot(), and
+// ZCom_shimSendReplItemsToConn() -- shared with the full-sync send in
+// ZCom_shimFlushPendingAnnouncements() above -- now live earlier in this
+// file, in the anonymous namespace right after ZCom_Node_Private's
+// definition, so both can see them.)
 
 void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
     if (!m_priv->registered || !m_priv->control || m_priv->network_id == 0) return;
@@ -1049,6 +1297,21 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
         }
     }
 
+    // Note: the one-time full sync for a newly-linked connection (see
+    // LinkedConn::needs_full_sync) is NOT handled here. It is sent
+    // synchronously from ZCom_shimFlushPendingAnnouncements(), immediately
+    // after that connection's NODE_CREATE/NODE_LINK_UNIQUE goes out, rather
+    // than waiting for this function's next invocation -- see that
+    // function's comment for why: ZCom_Control::ZCom_processReplicators()
+    // (which drives this function) runs *before* ZCom_processOutput() (which
+    // drives the announcement flush) in the game's per-frame call order, so
+    // gating a full sync here on "already announced" would always be one
+    // full frame late -- late enough for a dependent node (e.g. RacePlayer,
+    // announced in the same flush right after RaceState) to already be
+    // constructed and act on stale data client-side before the sync ever
+    // arrives. Sending it inline in the flush avoids that race entirely
+    // while still guaranteeing wire order (both ride the same reliable-
+    // ordered channel, sent back-to-back in the same function call).
     if (!pending.empty()) {
         // --- Distribute to every relevant connection, per direction rules,
         // batched into at most one reliable + one unreliable envelope per
@@ -1069,80 +1332,7 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
         for (size_t t = 0; t < targets.size(); t++) {
             ZCom_ConnID conn = targets[t];
             eZCom_NodeRole remote_role = (m_priv->role == eZCom_RoleAuthority) ? target_role[conn] : eZCom_RoleAuthority;
-
-            // outPreUpdate(): "Should return 'false' to prevent sending
-            // updates now, 'true' otherwise" -- a per-tick, per-connection
-            // veto, not a permanent one (zoidcom_node_interceptors.h).
-            if (m_priv->replication_interceptor &&
-                !m_priv->replication_interceptor->outPreUpdate(this, conn, remote_role)) {
-                continue;
-            }
-
-            ZCom_BitStream reliable_env, unreliable_env;
-            zU16 reliable_count = 0, unreliable_count = 0;
-            zU32 rep_bits = 0;
-
-            for (size_t p = 0; p < pending.size(); p++) {
-                bool applies;
-                if (m_priv->role == eZCom_RoleAuthority) {
-                    eZCom_NodeRole cr = target_role[conn];
-                    bool to_proxy = (pending[p].rules & ZCOM_REPRULE_AUTH_2_PROXY) != 0 && cr == eZCom_RoleProxy;
-                    bool to_owner = (pending[p].rules & ZCOM_REPRULE_AUTH_2_OWNER) != 0 && cr == eZCom_RoleOwner;
-                    applies = to_proxy || to_owner;
-                } else {
-                    applies = (pending[p].rules & ZCOM_REPRULE_OWNER_2_AUTH) != 0;
-                }
-                if (!applies) continue;
-
-                // outPreUpdateItem(): "This callback only gets called if the
-                // replication item really is about to be updated now" --
-                // matches `pending` already being exactly the dirty set for
-                // this tick. Gated by ZCOM_REPFLAG_INTERCEPT per the flag's
-                // own doc. No current game code sets that flag, so the
-                // primitive-item (no ZCom_Replicator to pass) branch below
-                // is unreachable today but handled per the file header.
-                if (pending[p].intercept && m_priv->replication_interceptor) {
-                    if (pending[p].replicator) {
-                        if (!m_priv->replication_interceptor->outPreUpdateItem(this, conn, remote_role, pending[p].replicator)) {
-                            continue;
-                        }
-                    } else {
-                        zshim::todoPhaseBOnce("ZCom_Node::ZCom_shimTickReplication(intercept-primitive)",
-                            "ZCOM_REPFLAG_INTERCEPT set on a primitive replication item; outPreUpdateItem() "
-                            "can't be called without a ZCom_Replicator instance to pass, sending the update "
-                            "unfiltered (unused by any current game code)");
-                    }
-                }
-
-                ZCom_BitStream& env = pending[p].unreliable ? unreliable_env : reliable_env;
-                zU16& count = pending[p].unreliable ? unreliable_count : reliable_count;
-                env.addInt(pending[p].index, 16);
-                zU32 bits = pending[p].payload->getBitCount();
-                env.addInt(bits, 16);
-                env.addBitStream(pending[p].payload, true);
-                count++;
-                rep_bits += 32 + bits; // index + length fields, plus the payload itself
-            }
-
-            if (reliable_count > 0) {
-                ZCom_BitStream out;
-                out.addInt(reliable_count, 16);
-                out.addBitStream(&reliable_env, true);
-                m_priv->control->ZCom_shimSendNodeReplBatch(conn, m_priv->network_id, true, out);
-            }
-            if (unreliable_count > 0) {
-                ZCom_BitStream out;
-                out.addInt(unreliable_count, 16);
-                out.addBitStream(&unreliable_env, true);
-                m_priv->control->ZCom_shimSendNodeReplBatch(conn, m_priv->network_id, false, out);
-            }
-
-            // outPostUpdate(): only fires when something was actually
-            // included in this connection's update this tick -- matches
-            // "The node has included it's update into the current packet."
-            if ((reliable_count > 0 || unreliable_count > 0) && m_priv->replication_interceptor) {
-                m_priv->replication_interceptor->outPostUpdate(this, conn, remote_role, rep_bits, 0, 0);
-            }
+            ZCom_shimSendReplItemsToConn(this, m_priv, conn, remote_role, pending, /*force_reliable=*/false);
         }
     }
 
