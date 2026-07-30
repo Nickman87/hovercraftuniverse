@@ -124,7 +124,23 @@ Rebuild v1.0 exactly as documented in the wiki's [CompileAndRun](docs/wiki/Compi
 2. Add a scripted dependency bootstrap (download + extract the Phase-0 mirrored packages into `dependencies/`).
 3. Optional: a CI job that proves the build stays green (v90 toolset on a self-hosted or custom-image runner).
 
-### Phase 3 — Optional: replace dead components (only where Phase 1 is fragile)
+### Phase 3 — Modernize the toolchain (in progress; staged so each step leaves a running game)
+
+Compiling with modern MSVC (v143) forces every C++ dependency to be rebuilt or replaced (the VC9 C++ ABI is incompatible). Dependency triage:
+
+- **Survive as-is** (no C++ ABI exposure): `Flash.ocx` (COM/LoadLibrary — but x86-only, so the build stays Win32), FMOD Ex (C API), Lua 5.1, TinyXML.
+- **Rebuild/port** (open source): Ogre → 1.12/1.14 (keep the D3D9 render system; materials rely on fixed-function + Cg/HLSL), OgreMax loader and SkyX ported along, OIS, Boost → current, LuaBind → maintained "deboostified" fork, Hikari from archived source.
+- **Replace** (closed-source VC9 binaries): ZoidCom → ENet behind a ZoidCom-API-compatible shim; Havok 6.6 → Jolt, including a new collision pipeline (level collision lives in proprietary `.hkx` — regenerate from the OgreMax `.scene`/`.mesh` geometry).
+
+Execution order:
+
+1. **Reference build with VC9** (Windows Sandbox + VS2008 Express from Microsoft's still-live ISO link; automation in `toolchain/sandbox/`) — the baseline for detecting behavior drift.
+2. **Modern-MSVC port of everything except physics/networking** (VS2022 Build Tools, Ogre 1.1x, rebuilt open-source deps; Havok/ZoidCom-dependent code temporarily stubbed) — proves the codebase compiles with current tools.
+3. **ZoidCom → ENet shim** — restores multiplayer on the modern build.
+4. **Havok → Jolt** *(on hold)* — the long pole: physics port + collision-from-mesh pipeline + feel tuning against the reference build.
+5. Later options: x64 (requires replacing Flash.ocx with Ruffle first), FMOD Core, D3D11/GL3+ renderers.
+
+### Phase 3 (original sketch) — replace dead components
 
 Only two components are genuinely *dead* rather than merely old. If long-term sustainability matters more than binary fidelity, replace them one at a time, validating against the Phase-1 build:
 
