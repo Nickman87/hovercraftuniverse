@@ -431,7 +431,27 @@ ZCom_BitStream& ZCom_BitStream::operator=(const ZCom_BitStream& _str) {
 }
 
 char* ZCom_BitStream::getString() {
-    // Legacy internal accessor kept for source parity; not used by game
-    // code (verified: no callers found in HovercraftUniverse/**).
+    // This is the overload the game actually uses everywhere it reads a
+    // string off the wire -- NOT getStringStatic(). It was previously a stub
+    // that returned the (stale, usually empty) TLS buffer without consuming
+    // anything from the stream, annotated "not used by game code (verified:
+    // no callers found)". That verification was simply wrong: there are nine
+    // call sites, including
+    //
+    //   CoreEngine/Entity.cpp:43,57      every entity's name + ogre entity name
+    //   HovercraftUniverse/RaceState.cpp:112   the track filename (announce data)
+    //   HovercraftUniverse/PlayerSettings.cpp:99   the player name
+    //   HovercraftUniverse/Hovercraft.cpp:25       hovercraft display name
+    //   Networking/TextEvent.cpp, NotifyEvent.cpp  all chat text
+    //
+    // Because it read nothing, it also left the read cursor parked before the
+    // string, desyncing every subsequent field in the same stream -- so the
+    // damage was never limited to the string itself.
+    //
+    // Symptoms this caused: an empty track filename, so the client built
+    // resource locations like "levels//textures" and then threw
+    // RuntimeAssertionException(!resourceName.empty()) opening the scene; and
+    // a blank player name and hovercraft selection in the lobby.
+    getString(tls_static_str_buf, kStaticStringBufSize);
     return (char*) tls_static_str_buf;
 }
