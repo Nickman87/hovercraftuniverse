@@ -141,3 +141,59 @@ if(HU_WITH_BOOST_UTILS)
     )
     target_link_libraries(hu_utils PUBLIC Boost::boost Boost::date_time)
 endif()
+
+# --- hu_ogremax ----------------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/OgreMax/*.cpp/.hpp --
+# the faithful VC9 conversion tracked by HovercraftUniverse/OgreMax/CMakeLists.txt
+# (source list mirrored from there; that file is NOT modified). This target
+# builds those same sources against Ogre 14.5.2 (vcpkg), with in-place API
+# fixes applied directly to the OgreMax sources (see docs/porting/ogre-api-gap.md).
+set(HU_OGREMAX_ROOT ${HU_ROOT}/OgreMax)
+
+find_package(OGRE CONFIG REQUIRED)
+
+add_library(hu_ogremax STATIC
+    ${HU_OGREMAX_ROOT}/OgreMaxModel.cpp
+    ${HU_OGREMAX_ROOT}/OgreMaxScene.cpp
+    ${HU_OGREMAX_ROOT}/OgreMaxUtilities.cpp
+    ${HU_OGREMAX_ROOT}/ProgressCalculator.cpp
+    ${HU_OGREMAX_ROOT}/tinyxml/tinyxml.cpp
+    ${HU_OGREMAX_ROOT}/tinyxml/tinyxmlerror.cpp
+    ${HU_OGREMAX_ROOT}/tinyxml/tinyxmlparser.cpp
+    ${HU_OGREMAX_ROOT}/Version.cpp
+    ${HU_OGREMAX_ROOT}/OgreMaxModel.hpp
+    ${HU_OGREMAX_ROOT}/OgreMaxPlatform.hpp
+    ${HU_OGREMAX_ROOT}/OgreMaxRenderWindowIterator.hpp
+    ${HU_OGREMAX_ROOT}/OgreMaxScene.hpp
+    ${HU_OGREMAX_ROOT}/OgreMaxTypes.hpp
+    ${HU_OGREMAX_ROOT}/OgreMaxUtilities.hpp
+    ${HU_OGREMAX_ROOT}/ProgressCalculator.hpp
+    ${HU_OGREMAX_ROOT}/tinyxml/tinyxml.h
+    ${HU_OGREMAX_ROOT}/Version.hpp
+)
+
+target_include_directories(hu_ogremax PRIVATE
+    ${HU_OGREMAX_ROOT}
+    ${HU_OGREMAX_ROOT}/tinyxml
+)
+
+target_compile_definitions(hu_ogremax PRIVATE
+    WIN32
+    _LIB
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+# NOTE: deliberately NOT defining UNICODE/_UNICODE here (unlike the VC9
+# OgreMax.vcproj / HovercraftUniverse/OgreMax/CMakeLists.txt, which do). The
+# OgreMax sources call several Win32 APIs (GetModuleFileName, GetFullPathName,
+# GetFileAttributes in OgreMaxUtilities.cpp) with narrow `char` buffers and
+# Ogre::String (std::string) throughout -- they were never actually Unicode
+# clean, and defining UNICODE/_UNICODE here resolves those calls to their *W
+# (wchar_t) forms, which fails to compile against narrow buffers. This is a
+# build-config difference from the VC9 project; it does not affect the VC9
+# build (HovercraftUniverse/OgreMax/CMakeLists.txt is untouched).
+
+target_link_libraries(hu_ogremax PUBLIC
+    OgreMain
+    OgreOverlay
+)

@@ -29,6 +29,12 @@
 #include <OgreShadowCameraSetupFocused.h>
 #include <OgreShadowCameraSetupLiSPSM.h>
 #include <OgreShadowCameraSetupPlaneOptimal.h>
+#include <OgreLogManager.h>
+#include <OgreTextureManager.h>
+#include <OgreViewport.h>
+#include <OgreMovablePlane.h>
+#include <OgreTechnique.h>
+#include <OgreKeyFrame.h>
 
 using namespace Ogre;
 using namespace OgreMax;
@@ -747,7 +753,7 @@ void OgreMaxScene::preRenderTargetUpdate(const RenderTargetEvent& e)
             //Set position into cube face cameras
             size_t faceCount = loadedRenderTexture.renderTexture->getNumFaces();
             for (size_t faceIndex = 0; faceIndex < faceCount; faceIndex++)
-                loadedRenderTexture.cubeFaceCameras[faceIndex]->setPosition(position);
+                loadedRenderTexture.cubeFaceCameraNodes[faceIndex]->setPosition(position);
         }
     }
 }
@@ -849,9 +855,9 @@ void OgreMaxScene::LoadScene(const TiXmlElement* objectElement)
     {
         //Create the scene manager
         String sceneManager = OgreMaxUtilities::GetStringAttribute(objectElement, "sceneManager", "generic");
-        SceneType sceneType;
-        if (OgreMaxUtilities::ParseSceneManager(sceneManager, sceneType))
-            this->sceneManager = Root::getSingleton().createSceneManager(sceneType, this->sceneExtraData.id);
+        String sceneManagerTypeName;
+        if (OgreMaxUtilities::ParseSceneManager(sceneManager, sceneManagerTypeName))
+            this->sceneManager = Root::getSingleton().createSceneManager(sceneManagerTypeName, this->sceneExtraData.id);
         else
             this->sceneManager = Root::getSingleton().createSceneManager(sceneManager, this->sceneExtraData.id);
 
@@ -1011,10 +1017,15 @@ void OgreMaxScene::FinishLoadingLookAndTrackTargets()
         }
 
         //Set look at depending on whether we have a node or camera
+        //TODO(modernize): Ogre::Camera::lookAt() requires
+        //OGRE_NODELESS_POSITIONING, not enabled in this build; cameras loaded
+        //by OgreMaxScene are always attached to a SceneNode now (either the
+        //owning node or a dedicated standalone node -- see LoadCamera()), so
+        //apply lookAt() to the camera's parent node instead.
         if (lookTarget->sourceNode != 0)
             lookTarget->sourceNode->lookAt(position, lookTarget->relativeTo, lookTarget->localDirection);
-        else if (lookTarget->sourceCamera != 0)
-            lookTarget->sourceCamera->lookAt(position);
+        else if (lookTarget->sourceCamera != 0 && lookTarget->sourceCamera->getParentSceneNode() != 0)
+            lookTarget->sourceCamera->getParentSceneNode()->lookAt(position, lookTarget->relativeTo);
     }
     this->lookTargets.clear();
 
@@ -1026,131 +1037,33 @@ void OgreMaxScene::FinishLoadingLookAndTrackTargets()
         SceneNode* trackTargetNode = GetSceneNode(trackTarget->nodeName, false);
 
         //Set tracking depending on whether we have a node or camera
+        //TODO(modernize): Ogre::Camera::setAutoTracking() requires
+        //OGRE_NODELESS_POSITIONING, not enabled in this build; apply it to the
+        //camera's parent SceneNode instead (see matching note above).
         if (trackTarget->sourceNode != 0)
             trackTarget->sourceNode->setAutoTracking(true, trackTargetNode, trackTarget->localDirection, trackTarget->offset);
-        else if (trackTarget->sourceCamera != 0)
-            trackTarget->sourceCamera->setAutoTracking(true, trackTargetNode, trackTarget->offset);
+        else if (trackTarget->sourceCamera != 0 && trackTarget->sourceCamera->getParentSceneNode() != 0)
+            trackTarget->sourceCamera->getParentSceneNode()->setAutoTracking(true, trackTargetNode, Vector3::NEGATIVE_UNIT_Z, trackTarget->offset);
     }
     this->trackTargets.clear();
 }
 
 void OgreMaxScene::LoadInstancedGeometries(const TiXmlElement* objectElement)
 {
-    //Ensure instancing is supported
-    if (!Root::getSingleton().getRenderSystem()->getCapabilities()->hasCapability(RSC_VERTEX_PROGRAM))
-	{
-		OGRE_EXCEPT
-            (
-            Exception::ERR_INVALIDPARAMS,
-            "Instanced geometry is not supported by the current render system and/or video card",
-            "OgreMaxScene::LoadInstancedGeometry"
-            );
-	}
-
-    //Read all the instanced geometries
-    String elementName;
-    const TiXmlElement* childElement = 0;
-    while (childElement = OgreMaxUtilities::IterateChildElements(objectElement, childElement))
-    {
-        elementName = childElement->Value();
-
-        if (elementName == "instancedGeometry")
-            LoadInstancedGeometry(childElement);
-    }
-}
-
-void OgreMaxScene::LoadInstancedGeometry(const TiXmlElement* objectElement)
-{
-    String name = OgreMaxUtilities::GetStringAttribute(objectElement, "name");
-    bool castShadows = OgreMaxUtilities::GetBoolAttribute(objectElement, "castShadows", true);
-    ObjectVisibility visibility = OgreMaxUtilities::GetObjectVisibilityAttribute(objectElement, "visible");
-    unsigned int batchCount = OgreMaxUtilities::GetUIntAttribute(objectElement, "batchCount", 0);
-    String renderQueue = OgreMaxUtilities::GetStringAttribute(objectElement, "renderQueue");
-    Real renderingDistance = OgreMaxUtilities::GetRealAttribute(objectElement, "renderingDistance", 0);
-    Vector3 origin = Vector3::ZERO;
-    Vector3 dimensions(1000000, 1000000, 1000000);
-    const TiXmlElement* entitiesElement = 0;
-
-    //Iterate over all the child elements
-    String elementName;
-    const TiXmlElement* childElement = 0;
-    while (childElement = OgreMaxUtilities::IterateChildElements(objectElement, childElement))
-    {
-        elementName = childElement->Value();
-
-        if (elementName == "origin")
-            origin = OgreMaxUtilities::LoadXYZ(childElement);
-        else if (elementName == "dimensions")
-            dimensions = OgreMaxUtilities::LoadXYZ(childElement);
-        else if (elementName == "entities")
-            entitiesElement = childElement;
-    }
-
-    //Create the instanced geometry
-    InstancedGeometry* instancedGeometry = this->sceneManager->createInstancedGeometry(name);
-    instancedGeometry->setCastShadows(castShadows);
-    OgreMaxUtilities::SetObjectVisibility(instancedGeometry, visibility);
-    instancedGeometry->setOrigin(origin);
-    instancedGeometry->setBatchInstanceDimensions(dimensions);
-    if (!renderQueue.empty())
-        instancedGeometry->setRenderQueueGroup(OgreMaxUtilities::ParseRenderQueue(renderQueue));
-    instancedGeometry->setRenderingDistance(renderingDistance);
-
-    //Add the entities
-    childElement = 0;
-    while (childElement = OgreMaxUtilities::IterateChildElements(entitiesElement, childElement))
-    {
-        elementName = childElement->Value();
-
-        if (elementName == "entity")
-            LoadInstancedGeometryEntity(childElement, instancedGeometry);
-    }
-
-    //Build the instanced geometry
-    instancedGeometry->build();
-
-    //Add additional batch instances
-    for (unsigned int batchIndex = 0; batchIndex < batchCount; batchIndex++)
-        instancedGeometry->addBatchInstance();
-}
-
-void OgreMaxScene::LoadInstancedGeometryEntity(const TiXmlElement* objectElement, InstancedGeometry* instancedGeometry)
-{
-    static const String TEMP_ENTITY_NAME("__instancedGeometryEntity");
-
-    String meshFile = OgreMaxUtilities::GetStringAttribute(objectElement, "meshFile");
-    Vector3 position = Vector3::ZERO;
-    Quaternion rotation = Quaternion::IDENTITY;
-    Vector3 scale = Vector3::UNIT_SCALE;
-    std::vector<EntityParameters::Subentity> subentities;
-
-    String elementName;
-    const TiXmlElement* childElement = 0;
-    while (childElement = OgreMaxUtilities::IterateChildElements(objectElement, childElement))
-    {
-        elementName = childElement->Value();
-
-        if (elementName == "position")
-            position = OgreMaxUtilities::LoadXYZ(childElement);
-        else if (elementName == "rotation")
-            rotation = OgreMaxUtilities::LoadRotation(childElement);
-        else if (elementName == "scale")
-            scale = OgreMaxUtilities::LoadXYZ(childElement);
-        else if (elementName == "subentities")
-            OgreMaxUtilities::LoadSubentities(childElement, subentities);
-    }
-
-    if (!meshFile.empty())
-    {
-        //Create temporary entity
-        Entity* entity = OgreMaxUtilities::CreateEntity(this->sceneManager, TEMP_ENTITY_NAME, meshFile, subentities);
-
-        //Add entity to the static geometry
-        instancedGeometry->addEntity(entity, position, rotation, scale);
-
-        //Destroy entity
-        this->sceneManager->destroyEntity(entity);
-    }
+    //TODO(modernize): Ogre::InstancedGeometry was removed from mainline Ogre
+    //(superseded by Ogre::InstanceManager, an API-incompatible replacement built
+    //around hardware instancing techniques rather than batched static geometry).
+    //This is a genuine functionality gap, not called out in
+    //docs/porting/ogre-api-gap.md: any <instancedGeometries> element in a scene
+    //file is now skipped entirely instead of being loaded. Re-implementing
+    //equivalent behavior would require porting to Ogre::InstanceManager, which
+    //is a real redesign (different batching model, different entity API), not
+    //a mechanical fix, so it's left undone here.
+    LogManager::getSingleton().logMessage
+        (
+        "OgreMaxScene: skipping 'instancedGeometries' element -- Ogre::InstancedGeometry no longer exists in modern Ogre (see docs/porting/ogre-api-gap.md)",
+        LML_WARNING
+        );
 }
 
 void OgreMaxScene::LoadStaticGeometries(const TiXmlElement* objectElement)
@@ -1532,16 +1445,12 @@ void OgreMaxScene::LoadEnvironment(const TiXmlElement* objectElement)
 
 void OgreMaxScene::LoadRenderTextures(const TiXmlElement* objectElement)
 {
-    //Get default pixel format
-    //It's unlikely that this would vary among render windows, but just take the minimum anyway
+    //TODO(modernize): Ogre::RenderWindow::getColourDepth() was removed from
+    //modern Ogre (RenderTarget/RenderWindow no longer expose a queryable
+    //colour bit depth). Assume 32-bit colour depth unconditionally -- true
+    //for effectively all modern displays/backbuffers -- rather than trying to
+    //detect a 16-bit desktop, which is no longer possible through the API.
     unsigned int bestColorDepth = 32;
-    if (this->renderWindows->Start())
-    {
-        do
-        {
-            bestColorDepth = std::min(this->renderWindows->GetCurrent()->getColourDepth(), bestColorDepth);
-        }while (this->renderWindows->MoveNext());
-    }
     PixelFormat defaultPixelFormat = (bestColorDepth == 16) ? PF_A4R4G4B4 : PF_A8R8G8B8;
 
     //Read all the render textures
@@ -1740,11 +1649,17 @@ void OgreMaxScene::FinishLoadingRenderTextures()
                 cameraName = loadedRenderTexture->camera->getName() + "_CubeFaceCamera" + StringConverter::toString(faceIndex);
 
                 //Create camera
+                //TODO(modernize): Ogre::Camera::setPosition()/setOrientation() require
+                //OGRE_NODELESS_POSITIONING, which the vcpkg Ogre build doesn't enable.
+                //Attach the camera to a dedicated SceneNode and position/orient that instead.
                 Camera* cubeFaceCamera = this->sceneManager->createCamera(cameraName);
                 cubeFaceCamera->setAspectRatio(1);
                 cubeFaceCamera->setFOVy(Degree(90));
-                cubeFaceCamera->setPosition(position);
-                cubeFaceCamera->setOrientation(CUBE_FACE_CAMERA_ORIENTATIONS[faceIndex]);
+
+                SceneNode* cubeFaceCameraNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                cubeFaceCameraNode->attachObject(cubeFaceCamera);
+                cubeFaceCameraNode->setPosition(position);
+                cubeFaceCameraNode->setOrientation(CUBE_FACE_CAMERA_ORIENTATIONS[faceIndex]);
 
                 //Use the reference camera's clip distances, if possible
                 if (loadedRenderTexture->camera != 0)
@@ -1754,6 +1669,7 @@ void OgreMaxScene::FinishLoadingRenderTextures()
                 }
 
                 loadedRenderTexture->cubeFaceCameras[faceIndex] = cubeFaceCamera;
+                loadedRenderTexture->cubeFaceCameraNodes[faceIndex] = cubeFaceCameraNode;
 
                 //Add viewport
                 RenderTarget* renderTarget = loadedRenderTexture->renderTexture->getBuffer(faceIndex)->getRenderTarget();
@@ -2306,8 +2222,14 @@ void OgreMaxScene::LoadShadows(const TiXmlElement* objectElement)
             this->sceneManager->setShadowDirLightTextureOffset(params.textureOffset);
             this->sceneManager->setShadowTextureFadeStart(params.textureFadeStart);
             this->sceneManager->setShadowTextureFadeEnd(params.textureFadeEnd);
-            this->sceneManager->setShadowTextureCasterMaterial(params.textureShadowCasterMaterial);
-            this->sceneManager->setShadowTextureReceiverMaterial(params.textureShadowReceiverMaterial);
+            //TODO(modernize): setShadowTextureCasterMaterial()/ReceiverMaterial()
+            //now take a MaterialPtr rather than a material name string.
+            if (!params.textureShadowCasterMaterial.empty())
+                this->sceneManager->setShadowTextureCasterMaterial(
+                    MaterialManager::getSingleton().getByName(params.textureShadowCasterMaterial));
+            if (!params.textureShadowReceiverMaterial.empty())
+                this->sceneManager->setShadowTextureReceiverMaterial(
+                    MaterialManager::getSingleton().getByName(params.textureShadowReceiverMaterial));
         }
 
         //Set shadow camera setup
@@ -2512,6 +2434,16 @@ void OgreMaxScene::LoadLight(const TiXmlElement* objectElement, const MovableObj
     light->setCastShadows(castShadows);
     light->setPowerScale(power);
 
+    //TODO(modernize): Ogre::Light::setPosition()/setDirection() require
+    //OGRE_NODELESS_POSITIONING, which this build doesn't enable. A scene-root
+    //light (owner.node == 0, i.e. not defined inside a <node> element) used to
+    //carry its own independent position/direction; it now gets a dedicated
+    //SceneNode under the scene root to hold that position/direction instead.
+    //Lights already being attached to an existing node (owner.node != 0) get
+    //their position/direction from that node instead, matching how attached
+    //MovableObjects always behaved in Ogre.
+    SceneNode* standaloneNode = 0;
+
     //Parse child elements
     String elementName;
     const TiXmlElement* childElement = 0;
@@ -2528,9 +2460,23 @@ void OgreMaxScene::LoadLight(const TiXmlElement* objectElement, const MovableObj
         else if (elementName == "lightAttenuation")
             LoadLightAttenuation(childElement, light);
         else if (elementName == "position")
-            light->setPosition(OgreMaxUtilities::LoadXYZ(childElement));
+        {
+            if (owner.node == 0)
+            {
+                if (standaloneNode == 0)
+                    standaloneNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                standaloneNode->setPosition(OgreMaxUtilities::LoadXYZ(childElement));
+            }
+        }
         else if (elementName == "normal")
-            light->setDirection(OgreMaxUtilities::LoadXYZ(childElement));
+        {
+            if (owner.node == 0)
+            {
+                if (standaloneNode == 0)
+                    standaloneNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                standaloneNode->setDirection(OgreMaxUtilities::LoadXYZ(childElement), Node::TS_WORLD);
+            }
+        }
         else if (elementName == "userDataReference")
             OgreMaxUtilities::LoadUserDataReference(childElement, objectExtraData->userDataReference);
         else if (elementName == "userData")
@@ -2546,7 +2492,10 @@ void OgreMaxScene::LoadLight(const TiXmlElement* objectElement, const MovableObj
     objectExtraData->object = light;
 
     //Attach light to the node
-    owner.Attach(light);
+    if (standaloneNode != 0)
+        standaloneNode->attachObject(light);
+    else
+        owner.Attach(light);
 
     //Add to loaded objects map
     this->loadedObjects[name] = light;
@@ -2586,6 +2535,13 @@ void OgreMaxScene::LoadCamera(const TiXmlElement* objectElement, const MovableOb
     camera->setAspectRatio(aspectRatio);
     camera->setProjectionType(OgreMaxUtilities::ParseProjectionType(projectionType));
 
+    //TODO(modernize): see the matching note in LoadLight() -- Ogre::Camera's
+    //own setPosition()/setOrientation()/setDirection() require
+    //OGRE_NODELESS_POSITIONING, not enabled in this build. A scene-root
+    //camera (owner.node == 0) gets a dedicated SceneNode to hold its
+    //position/orientation/direction instead.
+    SceneNode* standaloneNode = 0;
+
     //Parse child elements
     String elementName;
     const TiXmlElement* childElement = 0;
@@ -2601,11 +2557,32 @@ void OgreMaxScene::LoadCamera(const TiXmlElement* objectElement, const MovableOb
             camera->setFarClipDistance(farClip);
         }
         else if (elementName == "position")
-            camera->setPosition(OgreMaxUtilities::LoadXYZ(childElement));
+        {
+            if (owner.node == 0)
+            {
+                if (standaloneNode == 0)
+                    standaloneNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                standaloneNode->setPosition(OgreMaxUtilities::LoadXYZ(childElement));
+            }
+        }
         else if (elementName == "rotation")
-            camera->setOrientation(OgreMaxUtilities::LoadRotation(childElement));
+        {
+            if (owner.node == 0)
+            {
+                if (standaloneNode == 0)
+                    standaloneNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                standaloneNode->setOrientation(OgreMaxUtilities::LoadRotation(childElement));
+            }
+        }
         else if (elementName == "normal")
-            camera->setDirection(OgreMaxUtilities::LoadXYZ(childElement));
+        {
+            if (owner.node == 0)
+            {
+                if (standaloneNode == 0)
+                    standaloneNode = this->sceneManager->getRootSceneNode()->createChildSceneNode();
+                standaloneNode->setDirection(OgreMaxUtilities::LoadXYZ(childElement), Node::TS_WORLD);
+            }
+        }
         else if (elementName == "lookTarget")
             LoadLookTarget(childElement, 0, camera);
         else if (elementName == "trackTarget")
@@ -2625,7 +2602,10 @@ void OgreMaxScene::LoadCamera(const TiXmlElement* objectElement, const MovableOb
     objectExtraData->object = camera;
 
     //Attach camera to the node
-    owner.Attach(camera);
+    if (standaloneNode != 0)
+        standaloneNode->attachObject(camera);
+    else
+        owner.Attach(camera);
 
     //Add to loaded objects map
     this->loadedObjects[name] = camera;

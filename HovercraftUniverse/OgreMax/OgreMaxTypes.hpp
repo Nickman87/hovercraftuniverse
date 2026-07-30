@@ -842,15 +842,23 @@ namespace OgreMax
                 for (int index = 0; index < CUBE_FACE_COUNT; index++)
                 {
                     this->cubeFaceCameras[index] = 0;
+                    this->cubeFaceCameraNodes[index] = 0;
                     this->viewports[index] = 0;
                 }
             }
 
-            /** Sets the position of all cube face cameras */
+            /**
+             * Sets the position of all cube face cameras.
+             * TODO(modernize): modern Ogre (without OGRE_NODELESS_POSITIONING, which
+             * the vcpkg build doesn't enable) removed Ogre::Camera::setPosition() --
+             * cameras must be attached to a SceneNode and repositioned through it
+             * instead. cubeFaceCameraNodes[] holds the SceneNode each cube face
+             * camera is attached to (see OgreMaxScene::LoadRenderTextures()).
+             */
             void SetCubeFaceCameraPosition(const Ogre::Vector3& position)
             {
                 for (int index = 0; index < CUBE_FACE_COUNT; index++)
-                    this->cubeFaceCameras[index]->setPosition(position);
+                    this->cubeFaceCameraNodes[index]->setPosition(position);
             }
 
             /**
@@ -884,6 +892,8 @@ namespace OgreMax
 
             Ogre::Camera* camera;
             Ogre::Camera* cubeFaceCameras[CUBE_FACE_COUNT];
+            /** SceneNode each cube face camera is attached to; see TODO(modernize) above */
+            Ogre::SceneNode* cubeFaceCameraNodes[CUBE_FACE_COUNT];
             Ogre::Viewport* viewports[CUBE_FACE_COUNT];
 
             SceneNodeArray hiddenObjects;

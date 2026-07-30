@@ -44,7 +44,15 @@ namespace OgreMax
         static void LoadBoundingVolume(const TiXmlElement* objectElement, Types::BoundingVolume& volume);
         static void LoadBoundingVolumeFaces(const TiXmlElement* objectElement, int faceCount, std::vector<Types::BoundingVolume::Face>& faces);
 
-        static bool ParseSceneManager(const Ogre::String& sceneManager, Ogre::SceneType& sceneType);
+        // TODO(modernize): Ogre::SceneType/ST_* enum values (ST_GENERIC,
+        // ST_EXTERIOR_CLOSE, ST_EXTERIOR_FAR, ST_EXTERIOR_REAL_FAR, ST_INTERIOR)
+        // no longer exist -- modern Ogre's createSceneManager() takes a plugin
+        // type-name string instead. Only "generic" (-> "DefaultSceneManager",
+        // always available) has a real modern equivalent; the PCZ/Octree/BSP
+        // exterior/interior scene manager plugins this used to map to are not
+        // built by the vcpkg Ogre port at all (see docs/porting/ogre-api-gap.md).
+        // Returns the resolved Ogre scene-manager type name via sceneManagerTypeName.
+        static bool ParseSceneManager(const Ogre::String& sceneManager, Ogre::String& sceneManagerTypeName);
         static bool ParseBool(const Ogre::String& value);
         static Ogre::Light::LightTypes ParseLightType(const Ogre::String& type);
         static Ogre::ProjectionType ParseProjectionType(const Ogre::String& type);

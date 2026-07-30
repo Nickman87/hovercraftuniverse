@@ -20,7 +20,6 @@
 
 //Includes---------------------------------------------------------------------
 #include <OgreRenderTargetListener.h>
-#include <OgreInstancedGeometry.h>
 #include <OgreStaticGeometry.h>
 #include "OgreMaxPlatform.hpp"
 #include "ProgressCalculator.hpp"
@@ -416,9 +415,15 @@ namespace OgreMax
         void FinishLoadingLookAndTrackTargets();
 
         bool LoadResourceLocations(const TiXmlElement* objectElement);
+        // TODO(modernize): Ogre::InstancedGeometry was removed from mainline Ogre
+        // (superseded by Ogre::InstanceManager, an API-incompatible replacement).
+        // LoadInstancedGeometries() below now just logs a warning and skips the
+        // <instancedGeometries> element instead of loading it; the former
+        // LoadInstancedGeometry()/LoadInstancedGeometryEntity() helpers (which
+        // took an Ogre::InstancedGeometry*) were removed since the type no
+        // longer exists. See docs/porting/ogre-api-gap.md -- this class removal
+        // was not called out there.
         void LoadInstancedGeometries(const TiXmlElement* objectElement);
-        void LoadInstancedGeometry(const TiXmlElement* objectElement);
-        void LoadInstancedGeometryEntity(const TiXmlElement* objectElement, Ogre::InstancedGeometry* instancedGeometry);
         void LoadStaticGeometries(const TiXmlElement* objectElement);
         void LoadStaticGeometry(const TiXmlElement* objectElement);
         void LoadStaticGeometryEntity(const TiXmlElement* objectElement, Ogre::StaticGeometry* staticGeometry);

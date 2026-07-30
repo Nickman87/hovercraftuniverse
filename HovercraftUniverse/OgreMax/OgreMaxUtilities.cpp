@@ -231,25 +231,31 @@ void OgreMaxUtilities::LoadBoundingVolumeFaces(const TiXmlElement* objectElement
     }
 }
 
-bool OgreMaxUtilities::ParseSceneManager(const String& sceneManager, SceneType& sceneType)
+bool OgreMaxUtilities::ParseSceneManager(const String& sceneManager, String& sceneManagerTypeName)
 {
-    sceneType = (SceneType)0;
+    // TODO(modernize): the original Ogre::SceneType enum (ST_GENERIC,
+    // ST_EXTERIOR_CLOSE/FAR/REAL_FAR, ST_INTERIOR) mapped scene-file
+    // "sceneManager" values to specialized PCZ/Octree/BSP scene manager
+    // plugins. None of those plugins exist in modern Ogre (not built by the
+    // vcpkg port -- see docs/porting/ogre-api-gap.md). Only "generic" maps
+    // to a real modern scene manager type name ("DefaultSceneManager");
+    // the exterior/interior values now also fall back to it rather than
+    // failing, since there is no modern equivalent plugin to select.
+    sceneManagerTypeName.clear();
 
     String sceneManagerLower = sceneManager;
     StringUtil::toLowerCase(sceneManagerLower);
 
-    if (sceneManagerLower == "generic")
-        sceneType = ST_GENERIC;
-    else if (sceneManagerLower == "exteriorclose")
-        sceneType = ST_EXTERIOR_CLOSE;
-    else if (sceneManagerLower == "exteriorfar")
-        sceneType = ST_EXTERIOR_FAR;
-    else if (sceneManagerLower == "exteriorrealfar")
-        sceneType = ST_EXTERIOR_REAL_FAR;
-    else if (sceneManagerLower == "interior")
-		sceneType = ST_INTERIOR;
+    if (sceneManagerLower == "generic"
+        || sceneManagerLower == "exteriorclose"
+        || sceneManagerLower == "exteriorfar"
+        || sceneManagerLower == "exteriorrealfar"
+        || sceneManagerLower == "interior")
+    {
+        sceneManagerTypeName = "DefaultSceneManager";
+    }
 
-    return sceneType != (SceneType)0;
+    return !sceneManagerTypeName.empty();
 }
 
 bool OgreMaxUtilities::ParseBool(const String& value)
@@ -709,7 +715,10 @@ uint8 OgreMaxUtilities::ParseRenderQueue(const String& renderQueue)
         nameToNumber["queue7"] = RENDER_QUEUE_7;
 		nameToNumber["worldgeometry2"] = RENDER_QUEUE_WORLD_GEOMETRY_2;
         nameToNumber["queue8"] = RENDER_QUEUE_8;
-        nameToNumber["queue9"] = RENDER_QUEUE_9;
+        //TODO(modernize): RENDER_QUEUE_9 no longer exists in modern Ogre's
+        //RenderQueue enum (queues jump from RENDER_QUEUE_8=80 straight to
+        //RENDER_QUEUE_SKIES_LATE=90); "queue9" scene-file values now fall
+        //through to the "invalid render queue" exception below.
         nameToNumber["skieslate"] = RENDER_QUEUE_SKIES_LATE;
         nameToNumber["overlay"] = RENDER_QUEUE_OVERLAY;
 		nameToNumber["max"] = RENDER_QUEUE_MAX;
@@ -774,7 +783,9 @@ PixelFormat OgreMaxUtilities::ParsePixelFormat(const String& pixelFormat)
         nameToFormat["L8"] = PF_L8;
         nameToFormat["L16"] = PF_L16;
         nameToFormat["A8"] = PF_A8;
-        nameToFormat["A4L4"] = PF_A4L4;
+        //TODO(modernize): PF_A4L4 was removed from modern Ogre's PixelFormat
+        //enum with no replacement; "A4L4" scene-file pixel format values are
+        //no longer recognized.
         nameToFormat["BYTE_LA"] = PF_BYTE_LA;
         nameToFormat["R5G6B5"] = PF_R5G6B5;
         nameToFormat["B5G6R5"] = PF_B5G6R5;
@@ -1276,8 +1287,14 @@ bool OgreMaxUtilities::SetDefaultLighting(SceneManager* sceneManager, UpAxis upA
         //When the viewer faces down the forward axis, the light is angled to the lower right of the view
         Vector3 upDirection = (upAxis == UP_AXIS_Y) ? Vector3::UNIT_Y : Vector3::UNIT_Z;
         Vector3 position = upDirection + Vector3::NEGATIVE_UNIT_X;
-        light->setPosition(position);
-        light->setDirection(-position);
+
+        //TODO(modernize): Ogre::Light::setPosition()/setDirection() require
+        //OGRE_NODELESS_POSITIONING, not enabled in this build. Attach the
+        //default light to a dedicated SceneNode to carry its position/direction.
+        SceneNode* lightNode = sceneManager->getRootSceneNode()->createChildSceneNode();
+        lightNode->attachObject(light);
+        lightNode->setPosition(position);
+        lightNode->setDirection(-position, Node::TS_WORLD);
 
         //Set the ambient light if necessary
         if (sceneManager->getAmbientLight() == ColourValue::Black)
