@@ -89,6 +89,10 @@ void Application::parseIni() {
 void Application::createRoot() {
 	mOgreRoot = new Ogre::Root(mOgrePlugins.c_str(), "ogre.cfg", mLogPath);
 	std::cout << "Creating log at " << mLogPath << std::endl;
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+	// OgreOverlaySystem.h include comment in Application.h -- must be
+	// constructed with Root created but not yet initialised.
+	mOverlaySystem = new Ogre::OverlaySystem();
 }
 
 void Application::defineResources() {
@@ -148,6 +152,12 @@ void Application::setupScene() {
 	// SceneType-enum overload of createSceneManager no longer exists --
 	// modern Ogre selects a scene manager by its (string) factory type name.
 	msSceneMgr = mOgreRoot->createSceneManager("DefaultSceneManager", "Default");
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): register the Overlay
+	// component's bootstrap object (created in createRoot()) as a
+	// RenderQueueListener on this scene manager -- required for
+	// Ogre::OverlayManager::getSingleton() to be valid at all (it did not
+	// need this manual step pre-1.9) and for overlays to actually render.
+	msSceneMgr->addRenderQueueListener(mOverlaySystem);
 	msSceneMgr->setShadowTechnique(Ogre::SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED);
 
 	// Get created window
@@ -176,7 +186,7 @@ void Application::setupScene() {
 	//TODO: The creation of a GameView should be moved to InGameState (Nick)//
 	//////////////////////////////////////////////////////////////////////////
     // Add single game view to representation manager and fix aspect ratio
-    
+
 	GameView * gv = new GameView(msSceneMgr);
     Ogre::Camera * cam = gv->getCamera()->getCamera();
     Ogre::Viewport * vp = win->addViewport(cam);
@@ -205,7 +215,7 @@ void Application::setupInputSystem() {
 }
 
 void Application::createFrameListener() {
-	//mFrameListener = new ApplicationFrameListener(mOgreRoot->getSceneManager("Default"), mEntityManager, mRepresentationManager, 
+	//mFrameListener = new ApplicationFrameListener(mOgreRoot->getSceneManager("Default"), mEntityManager, mRepresentationManager,
 	//	mInputManager, mClient);
 	//mOgreRoot->addFrameListener(mFrameListener);
 	mOgreRoot->addFrameListener(mGameStateMgr);

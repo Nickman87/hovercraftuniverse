@@ -2,6 +2,15 @@
 #define APPLICATION_H_
 
 #include <OgreRoot.h>
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Overlay was split out of
+// core Ogre into a separate component; Root no longer auto-creates the
+// OverlayManager/FontManager, an explicit Ogre::OverlaySystem must be
+// constructed and registered as a RenderQueueListener with each
+// SceneManager -- see createRoot()/setupScene() in Application.cpp. Without
+// this, Ogre::OverlayManager::getSingletonPtr() (called by
+// MouseVisualisation's ctor and every GUI overlay) returns null and the
+// first overlay created access-violates.
+#include <OgreOverlaySystem.h>
 #include "EntityManager.h"
 #include "InputManager.h"
 #include "GameStateManager.h"
@@ -34,6 +43,11 @@ protected:
 
 	/** The root Ogre object */
 	Ogre::Root * mOgreRoot;
+
+	/** The Overlay component's bootstrap object (see the OgreOverlaySystem.h
+	 * include comment above) -- created in createRoot(), registered with
+	 * the scene manager in setupScene(). */
+	Ogre::OverlaySystem * mOverlaySystem;
 
 	/** The game state manager */
 	GameStateManager* mGameStateMgr;

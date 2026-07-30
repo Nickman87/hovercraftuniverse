@@ -406,7 +406,21 @@ add_library(hu_gui STATIC
 # hu_coreengine's later find_path/find_library calls -- both are cached
 # find results, so doing this twice is harmless.)
 find_path(HU_OIS_INCLUDE_DIR NAMES OIS.h PATH_SUFFIXES ois)
-find_library(HU_OIS_LIBRARY NAMES OIS)
+# OIS's Release and Debug import libs (OIS.lib / OIS_d.lib) are NOT ABI
+# compatible with each other (different CRT/_ITERATOR_DEBUG_LEVEL) -- a
+# single `find_library(NAMES OIS)` always resolves the Release one
+# (vcpkg's non-debug lib/ dir), regardless of which config this multi-config
+# generator is currently building. Linking that into a Debug-config exe
+# compiles/links fine but crashes at runtime (STATUS_ACCESS_VIOLATION inside
+# OIS.dll itself, confirmed via Windows Event Log's Application error entry
+# while first running the client -- see docs/porting/first-run.md) the
+# instant OIS is asked to do anything involving an STL container crossing
+# the DLL boundary (device enumeration). Fixed below by resolving BOTH
+# import libs and selecting per-config via the debug/optimized
+# target_link_libraries keywords (the standard CMake idiom for this,
+# works with any generator).
+find_library(HU_OIS_LIBRARY_RELEASE NAMES OIS)
+find_library(HU_OIS_LIBRARY_DEBUG NAMES OIS_d)
 
 # GUIManager.h uses boost::signals2::mutex (<boost/signals2/mutex.hpp>) and
 # IResolution.h uses boost::shared_ptr (<boost/shared_ptr.hpp>) -- both
@@ -437,7 +451,8 @@ target_link_libraries(hu_gui PUBLIC
     hu_exceptions
     OgreMain
     OgreOverlay
-    ${HU_OIS_LIBRARY}
+    debug ${HU_OIS_LIBRARY_DEBUG}
+    optimized ${HU_OIS_LIBRARY_RELEASE}
     Boost::boost
     Boost::signals2
 )
@@ -689,7 +704,21 @@ add_library(hu_coreengine STATIC
 # ${includedir}/ois). CoreEngine sources #include <OIS.h> (not <OIS/OIS.h>),
 # so the ois/ subdirectory itself must be on the include path.
 find_path(HU_OIS_INCLUDE_DIR NAMES OIS.h PATH_SUFFIXES ois)
-find_library(HU_OIS_LIBRARY NAMES OIS)
+# OIS's Release and Debug import libs (OIS.lib / OIS_d.lib) are NOT ABI
+# compatible with each other (different CRT/_ITERATOR_DEBUG_LEVEL) -- a
+# single `find_library(NAMES OIS)` always resolves the Release one
+# (vcpkg's non-debug lib/ dir), regardless of which config this multi-config
+# generator is currently building. Linking that into a Debug-config exe
+# compiles/links fine but crashes at runtime (STATUS_ACCESS_VIOLATION inside
+# OIS.dll itself, confirmed via Windows Event Log's Application error entry
+# while first running the client -- see docs/porting/first-run.md) the
+# instant OIS is asked to do anything involving an STL container crossing
+# the DLL boundary (device enumeration). Fixed below by resolving BOTH
+# import libs and selecting per-config via the debug/optimized
+# target_link_libraries keywords (the standard CMake idiom for this,
+# works with any generator).
+find_library(HU_OIS_LIBRARY_RELEASE NAMES OIS)
+find_library(HU_OIS_LIBRARY_DEBUG NAMES OIS_d)
 
 # EntityPropertySystem.cpp/.h (re-enabled above) uses boost::mutex
 # (<boost/thread/mutex.hpp>), which is a genuine, non-portable-fix-able
@@ -738,7 +767,8 @@ target_link_libraries(hu_coreengine PUBLIC
     OgreMain
     OgreOverlay
     OgreBites
-    ${HU_OIS_LIBRARY}
+    debug ${HU_OIS_LIBRARY_DEBUG}
+    optimized ${HU_OIS_LIBRARY_RELEASE}
     hu_utils
     hu_exceptions
     hu_networking
@@ -834,6 +864,17 @@ target_link_libraries(hu_scripting PUBLIC
 # port of anything under HovercraftUniverse/), backed by Bullet 3.25
 # (vcpkg). See docs/porting/havok-compat.md.
 add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/havok ${CMAKE_BINARY_DIR}/compat_havok)
+
+# --- hu_skyx_compat --------------------------------------------------------
+# API-compatible, from-scratch replacement for SkyX 0.1 (sky/cloud/star
+# rendering, LGPL). Real SkyX 0.1 source could not be recovered (only VC9
+# headers+binaries survive, see archive-mirror/SkyX_0_1.rar); a real SkyX
+# 0.4 source mirror exists (github.com/TommyTeaVee/ogre_skyx) but its API
+# already diverged from the 0.1 headers this game targets. See
+# docs/porting/skyx-compat.md for the full route-not-taken analysis.
+# Sky rendering is inert as a result (InGameState.cpp's mSkyX exists and is
+# updated every frame, but draws nothing) -- honestly logged once, not faked.
+add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/skyx ${CMAKE_BINARY_DIR}/compat_skyx)
 
 # --- hu_game_physics -------------------------------------------------------
 # Ported (in place, not copied) from HovercraftUniverse/HovercraftUniverse/*
@@ -957,26 +998,55 @@ add_library(hu_game_physics STATIC
     ${HU_GAMEPHYSICS_ROOT}/MainMenu.cpp
     ${HU_GAMEPHYSICS_ROOT}/ClientConnectThread.cpp
 
-    # NEWLY DISCOVERED excluded files (not GUI/Sound/Scripting-tainted --
-    # a DIFFERENT, genuine missing dependency found while re-enabling this
-    # set): InGameState.cpp/.h #include <SkyX.h> and use the SkyX::SkyX sky
-    # rendering plugin class directly. SkyX is a real, separate third-party
-    # Ogre add-on (headers survive at HovercraftUniverse/dependencies/SkyX,
-    # source archive at archive-mirror/SkyX_0_1.rar per RUNNING.md's
-    # inventory) that has never been vendored/built anywhere in this modern
-    # tree -- it is not part of Hikari/GUI and vendoring+porting it is a
-    # separate task of the same shape as hu_hikari above, out of scope here.
-    # Left on disk untouched; re-add once SkyX has its own hu_skyx target.
-    #   InGameState.cpp     -- SkyX (not GUI/Sound; those taints are resolved)
-    #   MainMenuState.cpp   -- #includes "InGameState.h" directly (to
-    #                          transition into it), so it's blocked by the
-    #                          exact same missing SkyX.h transitively, even
-    #                          though MainMenuState.cpp itself never
-    #                          mentions SkyX.
-    #   LobbyState.cpp      -- same as MainMenuState.cpp, but ALSO directly
-    #                          instantiates `new InGameState(...)` (not just
-    #                          an #include), so it needs InGameState's full
-    #                          definition, not just its declaration.
+    # Re-enabled now that hu_skyx_compat exists (see docs/porting/skyx-compat.md).
+    # InGameState.cpp/.h #include <SkyX.h> and use the SkyX::SkyX sky
+    # rendering plugin class directly; MainMenuState.cpp #includes
+    # InGameState.h to transition into it; LobbyState.cpp does the same AND
+    # directly instantiates `new InGameState(...)`. All three build clean
+    # against compat/skyx's shim (sky rendering itself is inert -- see that
+    # doc -- but the game code compiles and links unchanged).
+    ${HU_GAMEPHYSICS_ROOT}/InGameState.cpp
+    ${HU_GAMEPHYSICS_ROOT}/MainMenuState.cpp
+    ${HU_GAMEPHYSICS_ROOT}/LobbyState.cpp
+
+    # Re-enabled: ClientLoader.cpp's Ogre 1.7->14 migration (see
+    # docs/porting/ogre-api-gap.md and the EXCLUDED (C) note below, now
+    # resolved): setShadowTextureCasterMaterial/ReceiverMaterial now take a
+    # MaterialPtr (resolved via MaterialManager::getByName(), same fix as
+    # OgreMax/OgreMaxScene.cpp's identical call); Ogre::Light::setPosition()
+    # no longer exists (nodeless positioning not built) -- the light is now
+    # attached to a SceneNode positioned at its authored location, the same
+    # pattern already used by GameView.cpp/RaceCamera.cpp. The
+    # shadow-camera-setup classes (DefaultShadowCameraSetup and friends) and
+    # the Ogre::Animation/TransformKeyFrame APIs turned out to need NO
+    # changes at all -- both are still present, unchanged, in this vcpkg
+    # Ogre 14.5.2 build (confirmed against
+    # C:\Users\dirk\vcpkg\installed\x86-windows\include\OGRE\
+    # OgreShadowCameraSetup*.h), and ClientLoader.cpp's onSkyBox/onSkyDome/
+    # onNode NodeAnimation parameters were always unused pass-throughs, not
+    # actual Animation/KeyFrame API calls -- the original exclusion comment's
+    # assumption that a "nontrivial Ogre migration pass" was needed there was
+    # wrong; the real fix was two call sites.
+    ${HU_GAMEPHYSICS_ROOT}/ClientLoader.cpp
+
+    # Re-enabled: HovercraftLoader.cpp. Re-enabling InGameState.cpp/
+    # MainMenuState.cpp/LobbyState.cpp above changed the exe's link closure
+    # enough that the linker now DOES pull in HUClient.obj's
+    # HovercraftLoader::HovercraftLoader/~HovercraftLoader call site (it did
+    # not before, when this file's exclusion was merely latent -- see the
+    # earlier revision of this comment). On actually compiling it: the
+    # RaceCamera/GameView Ogre-api-gap breakage this file was assumed to
+    # inherit transitively (via #include "GameView.h") turned out to already
+    # be fixed (see docs/porting/hikari-gui.md section 7 -- RaceCamera.cpp/
+    # GameView.cpp were ported before this task started), and its
+    # Ogre::Animation/NodeAnimationTrack/TransformKeyFrame calls in onNode()
+    # needed NO changes -- that API is unchanged between Ogre 1.7 and 14.5.2
+    # (confirmed against OgreAnimation.h/OgreAnimationTrack.h/OgreKeyFrame.h).
+    # This file compiles clean, unmodified, once its two real blockers
+    # (RaceCamera/GameView, now already fixed) are out of the way -- the
+    # original exclusion comment's assumption of "a real Ogre migration pass
+    # needed" was stale.
+    ${HU_GAMEPHYSICS_ROOT}/HovercraftLoader.cpp
     #
     # EXCLUDED (B) -- NOT GUI/Sound/Scripting-tainted; each blocked by its
     # own genuine, pre-existing, non-Havok bug in HovercraftUniverse/**
@@ -1039,6 +1109,20 @@ add_library(hu_game_physics STATIC
 )
 
 target_include_directories(hu_game_physics PUBLIC
+    # NOTE: listed ahead of hu_sound's own PUBLIC include dir (which is
+    # pulled in transitively via the target_link_libraries below and also
+    # contains ${HU_ROOT}/dependencies/FMOD/includes/HovSound.h -- a STALE
+    # copy missing MUSICCUE_HOVSOUND_MENU, present only in this real,
+    # up-to-date data/sound/HovSound.h). InGameState.cpp/MainMenuState.cpp's
+    # #include <HovSound.h> (angle-bracket, i.e. include-path search order
+    # dependent) resolved to the stale FMOD copy before this entry existed,
+    # which is why re-enabling those files (see EXCLUDED note above) surfaced
+    # "MUSICCUE_HOVSOUND_MENU: undeclared identifier" -- a real,
+    # pre-existing include-path ambiguity between two out-of-sync copies of
+    # the same generated header, not a new bug in this port. Putting the
+    # real copy first (build-config fix, not a game-code edit) makes the
+    # angle-bracket include resolve to the complete, current header.
+    ${HU_ROOT}/data/sound
     ${HU_GAMEPHYSICS_ROOT}
     ${HU_COREENGINE_ROOT}
     ${HU_NETWORKING_ROOT}
@@ -1110,6 +1194,7 @@ find_package(Boost QUIET COMPONENTS interprocess) # header-only; component mainl
 
 target_link_libraries(hu_game_physics PUBLIC
     hu_havok_compat
+    hu_skyx_compat
     hu_coreengine
     hu_networking
     hu_zoidcom_compat

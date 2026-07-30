@@ -14,6 +14,12 @@
 #include "ProgressMonitor.h"
 #include "RepresentationManager.h"
 #include <OgreSceneManager.h>
+#include <OgreMaterialManager.h>
+#include <OgreRoot.h>
+#include <OgreMovablePlane.h>
+#include <OgreShadowCameraSetupFocused.h>
+#include <OgreShadowCameraSetupLiSPSM.h>
+#include <OgreShadowCameraSetupPlaneOptimal.h>
 
 namespace HovUni {
 
@@ -124,8 +130,16 @@ void ClientLoader::onShadowProperties(OgreMax::Types::ShadowParameters& params) 
             this->mSceneMgr->setShadowDirLightTextureOffset(params.textureOffset);
             this->mSceneMgr->setShadowTextureFadeStart(params.textureFadeStart);
             this->mSceneMgr->setShadowTextureFadeEnd(params.textureFadeEnd);
-            this->mSceneMgr->setShadowTextureCasterMaterial(params.textureShadowCasterMaterial);
-            this->mSceneMgr->setShadowTextureReceiverMaterial(params.textureShadowReceiverMaterial);
+            // Ogre 14 API fix (docs/porting/ogre-api-gap.md): these now take a
+            // MaterialPtr rather than a material name string; resolve via
+            // MaterialManager::getByName() (same fix as OgreMax/OgreMaxScene.cpp's
+            // identical call, ParseShadowCameraSetup's sibling code path).
+            if (!params.textureShadowCasterMaterial.empty())
+                this->mSceneMgr->setShadowTextureCasterMaterial(
+                    Ogre::MaterialManager::getSingleton().getByName(params.textureShadowCasterMaterial));
+            if (!params.textureShadowReceiverMaterial.empty())
+                this->mSceneMgr->setShadowTextureReceiverMaterial(
+                    Ogre::MaterialManager::getSingleton().getByName(params.textureShadowReceiverMaterial));
         }
 
 		 //Set shadow camera setup
@@ -183,7 +197,6 @@ void ClientLoader::onLight(OgreMax::Types::LightParameters& parameters, const Og
 	light->setPowerScale(parameters.power);
 	light->setDiffuseColour(parameters.diffuseColor);
 	light->setSpecularColour(parameters.specularColor);
-	light->setPosition(parameters.position);
 	light->setSpotlightFalloff(parameters.spotlightFalloff);
 	light->setSpotlightInnerAngle(parameters.spotlightInnerAngle);
 	light->setSpotlightOuterAngle(parameters.spotlightOuterAngle);
@@ -201,7 +214,14 @@ void ClientLoader::onLight(OgreMax::Types::LightParameters& parameters, const Og
 			parentnode = mSceneMgr->getRootSceneNode();
 	}
 
-	parentnode->attachObject(light);
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Ogre::Light::setPosition()
+	// no longer exists (this vcpkg Ogre build is not compiled with
+	// OGRE_NODELESS_POSITIONING) -- Light is nodeless now, so attach it to a
+	// SceneNode positioned at the light's authored position instead, exactly
+	// the same pattern already applied to GameView.cpp's point light and
+	// RaceCamera.cpp's camera (see docs/porting/hikari-gui.md section 7).
+	Ogre::SceneNode* lightNode = parentnode->createChildSceneNode(parameters.name + "Node", parameters.position);
+	lightNode->attachObject(light);
 
 }
     
