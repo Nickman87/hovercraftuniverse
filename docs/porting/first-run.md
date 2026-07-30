@@ -592,3 +592,77 @@ Also worth knowing: `DedicatedServer::mConfig` and `mEngineSettings` are
 **static**, and `~DedicatedServer` does `mConfig->saveFile(); delete mConfig;`.
 Fragile in a process that hosts both a client and a server, which single-player
 does.
+
+### 9.6 Window input dies after the first focus change (OPEN BUG)
+
+**Symptom.** The client accepts mouse input until the window loses focus once.
+After a single alt-tab away and back, the in-game cursor stops moving, clicks do
+nothing, and Windows *ghosts* the window -- greys it out and appends
+"(not responding)" to the title. The process is still alive and its CPU sits at
+roughly one core.
+
+This is not cosmetic. It makes the game untestable through the GUI, because
+reporting a result requires alt-tabbing, which destroys the session you were
+reporting on. It also makes the build unplayable in any normal sense.
+
+**Working around it.** Do all clicking *before* any focus change. Launch, click
+through the whole scenario, then alt-tab to report. That order works reliably
+and is how the race path was tested successfully.
+
+For automated testing, use the `--autoconnect` harness (commit `ad4a77c`)
+instead, which needs no clicks at all.
+
+#### What was ruled out
+
+**Not the shim.** The client holds no `ZCom_Control` at all while the menu is up
+(see 9.5), so none of the networking work can be implicated.
+
+**Not (only) the missing message pump.** A genuine Ogre 1.7 -> 14 regression was
+found here, and fixed, but it did not fix the symptom:
+
+- In Ogre 1.7, `Root::startRendering()` called
+  `WindowEventUtilities::messagePump()` once per frame, so applications got
+  Win32 message dispatch for free.
+- In Ogre 14, `startRendering()` only loops `renderOneFrame()`, and
+  `messagePump()` has **moved out of `OgreMain` into the Bites component**
+  (`Components/Bites/src/OgreWindowEventUtilities.cpp:177`), where it is called
+  solely by `Ogre::ApplicationContext` -- a framework this game does not use.
+  Verified by grep: `messagePump` does not appear anywhere in `OgreMain`.
+
+So since the port, *nothing* had ever serviced the render window's message
+queue. `Application::startRenderLoop` now pumps explicitly. This is correct and
+necessary regardless -- without it, window close/move/resize events are never
+dispatched to the registered `WindowEventListener` -- but it is **not
+sufficient**: `Responding` stayed `False` and the ghosting behaviour is
+unchanged. Kept as a real fix for a real gap, flagged as unproven against this
+particular symptom.
+
+**Not OIS exclusivity, probably.** OIS is created with only a `WINDOW`
+parameter, so its Win32 DirectInput backend defaults to exclusive+foreground
+acquisition, which does lose devices on focus loss. Adding
+`w32_mouse`/`w32_keyboard` `DISCL_NONEXCLUSIVE` was tried and **reverted**,
+because it changed nothing and the "one thing at a time" discipline is worth
+more than a speculative behaviour change. Worth retrying *after* the real cause
+is found, since non-exclusive is arguably the right mode for a windowed game
+whose GUI is a Flash overlay sharing the system cursor.
+
+#### Leading hypothesis, untested
+
+D3D9 device loss. On focus change a windowed D3D9 device can be lost, and
+Ogre's device-lost path retries a reset. If that retry loop spins without
+returning to the render/pump loop, everything above follows: no rendering (the
+cursor sprite freezes), no message dispatch (Windows ghosts the window), and no
+input. The ~1 core of CPU while ghosted fits a retry loop better than it fits a
+blocked wait.
+
+Testable by instrumenting `D3D9RenderSystem`'s device-lost handling, or simply
+by trying the OpenGL render system, where D3D9 device loss cannot occur. Neither
+has been done.
+
+#### Note on `Process.Responding`
+
+It reads `False` for this executable **even when it is rendering perfectly** and
+has never lost focus. It is not a usable health signal here, and it misled this
+investigation twice -- first read as evidence of a hang, later used as a success
+criterion for the message-pump fix. Judge health by CPU and by log progress
+instead.

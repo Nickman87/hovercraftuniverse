@@ -238,7 +238,34 @@ void Application::createFrameListener() {
 }
 
 void Application::startRenderLoop() {
-	mOgreRoot->startRendering();
+	// Modern-build fix (docs/porting/first-run.md section 9.6): pump the Win32
+	// message queue ourselves.
+	//
+	// In Ogre 1.7, Root::startRendering() called
+	// WindowEventUtilities::messagePump() once per frame, so applications got
+	// message dispatch for free and this method was a one-liner. In Ogre 14
+	// startRendering() only loops renderOneFrame(), and messagePump() has moved
+	// out of OgreMain into the Bites component, where it is called solely by
+	// Ogre::ApplicationContext -- a framework this game does not use.
+	//
+	// The result was that nothing ever serviced the render window's message
+	// queue. Windows therefore reported the process as "not responding" from
+	// the moment it started (even while it was rendering perfectly), ghosted
+	// the window the instant the user interacted with it after any focus
+	// change, and starved input: OIS's DirectInput devices depend on window
+	// activation messages, so the game accepted clicks until the first
+	// alt-tab and was dead to mouse and keyboard from then on.
+	//
+	// renderOneFrame() returns false when a frame listener asks to stop, which
+	// is how the game quits (see GameStateManager), so this loop terminates on
+	// exactly the same condition startRendering() did.
+	while (true) {
+		Ogre::WindowEventUtilities::messagePump();
+
+		if (!mOgreRoot->renderOneFrame()) {
+			break;
+		}
+	}
 }
 
 }
