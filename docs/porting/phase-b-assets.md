@@ -161,11 +161,24 @@ Same root cause — vintage profiles the modern `D3DCompiler` won't assemble.
    either forking Ogre's media into our tree or patching during runtime-layout assembly —
    both real maintenance costs for something that may not matter.
 
-**Action:** determine whether the additive-integrated texture-shadow path actually resolves
-`Ogre/ShadowBlend*`. If it doesn't, document these as expected benign log noise and move on.
-If it does, patch our runtime copy in the layout script and record it there.
+**Finding — confirmed, not inferred. Leave them alone.** Traced through both Ogre's media and
+its source:
 
-Either way shadows are cosmetic and belong in workstream F, not on the path to playable.
+- In `Shadow.material` (`vcpkg/installed/x86-windows/share/ogre/Media/Main/`),
+  `Ogre/ShadowBlendVP` and `Ogre/ShadowBlendFP` are referenced *only* by
+  `Ogre/StencilShadowModulationPass`, `Ogre/StencilShadowVolumes` and
+  `Ogre/Debug/ShadowVolumes` — all stencil-shadow materials.
+- In the Ogre 14.5.2 source, `OgreStencilShadowRenderer.cpp` is the only file that references
+  those materials. `OgreTextureShadowRenderer.cpp` — the path this game actually uses via
+  `SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED` — touches only `Ogre/TextureShadowCaster` and
+  `Ogre/TextureShadowReceiver`, both fixed-function materials with **no shader programs at
+  all**.
+
+So all four failures are dead code for this game's shadow configuration. They are expected
+benign log noise, no runtime-layout patch is needed, and patching them would have been pure
+risk for zero benefit.
+
+Shadows themselves remain cosmetic and belong in workstream F, not on the path to playable.
 
 ## 4. SkyX shaders — out of scope
 
