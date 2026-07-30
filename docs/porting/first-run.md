@@ -349,12 +349,11 @@ here.
 
 ## 8. Ordered remaining-work list to a playable modern build
 
-1. **Confirm the main-menu Flash render visually** -- inject a real mouse
-   click (or drive it via Hikari's scripting hooks) to (a) definitively
-   resolve the screenshot ambiguity from section 6, and (b) actually reach
-   Singleplayer -> `InGameState`, which is the first point that exercises
-   `compat/havok`'s Phase A physics and `compat/skyx`'s inert shim in
-   practice.
+> **Superseded by [phase-b-plan.md](phase-b-plan.md)** for items 1-3, and item
+> 1 is now DONE -- see section 9 below. Items 4 and 5 are also done (commit
+> `e761514`). Kept for history.
+
+1. ~~**Confirm the main-menu Flash render visually**~~ -- done; see section 9.
 2. **`.hkx` collision loading (Havok Phase B)** -- per
    `docs/porting/havok-compat.md`, `hkpHavokSnapshot::load()` is a stub;
    once in a race, expect zero collision geometry (falls through the
@@ -384,3 +383,161 @@ here.
    forward the pre-existing flagged-but-not-fixed gaps from
    `docs/porting/hikari-gui.md`/`havok-compat.md` (`boost-signals2`,
    `boost-random`, `boost-interprocess`).
+
+---
+
+## 9. Second run: the menu-to-race path, actually driven (Phase B workstream A)
+
+This is the run that item 1 above asked for. Goal was information, not repair.
+It changed several things we believed.
+
+### 9.1 What happened
+
+`Singleplayer` was clicked and the client got **considerably further than the
+Phase B plan predicted**, reaching the lobby:
+
+```
+TODO(phaseB): ZCom_Node::registerNodeDynamic ...
+TODO(phaseB): ZCom_Node::addReplicationInt / addReplicationBool / registerNodeUnique
+[Server]: Ready for incoming connections
+TODO(phaseB): ZCom_Control::ZCom_processReplicators ...
+TODO(phaseB): ZCom_Node::registerNode*(non-authority) ...
+[HUClient]: Connection thread created.
+[MainMenu]: onsingleplayer finished
+[ClientConnectThread]: thread started
+[HUClient]: received connection result
+TODO(phaseB): ZCom_Control::ZCom_requestDownstreamLimit / ZCom_requestZoidMode
+[HUClient\0]: My unique ID is 0
+TODO(phaseB): ZCom_Node::addReplicator / setAnnounceData / dependsOn / setOwner
+[Lobby]: Inserting PlayerSettings of other player
+[Lobby]: New player joined with id 20
+[ClientConnectThread]: thread finished
+Warning: force-disabling 'lighting' and 'depth_check' of Material Background_LBMaterial ...
+```
+
+So, working end to end: the in-process dedicated server starts, the client
+dials `localhost` over real ENet, the connection is accepted, the client gets
+its unique ID, `MainMenuState::finishConnect()` fires, and `LobbyState`
+activates and renders its Flash GUI.
+
+**The lobby's player list is empty** -- the `Player Name / Character / Car`
+column headers render with zero rows. This is exactly the predicted
+consequence of the node-linking gap: the client never receives a
+`PlayerSettings` proxy node, so it does not know any player exists. The
+settings panel's visible values (`Track = SimpleTrack...`, `Playercount 2`,
+`Fill with bots Yes`) are Flash-side defaults, not replicated state.
+
+Note the two `[Lobby]:` lines are **server-side**. Client and server share one
+process and one Ogre log in single-player, so log lines from the two cannot be
+told apart by inspection alone -- worth remembering when debugging Phase B.
+
+### 9.2 Corrections to earlier beliefs
+
+**"Not responding" is normal for this app, not a hang.** A freshly launched
+client that has reached the menu and is rendering correctly still reports
+`Responding = False` from `Get-Process`, and its title bar gains the OS's
+"(not responding)" suffix. The main loop does not pump Win32 messages in a way
+that answers a `WM_NULL` ping. Consequently:
+
+- `Responding` is **useless as a health signal** for this executable.
+- `SetForegroundWindow` **fails** against the window, so it cannot be raised
+  programmatically once it loses focus.
+- CPU sitting at ~110-115% of one core is just the uncapped render loop
+  (`VSync=No`), not a spin bug.
+
+An earlier reading of this session -- "healthy at 30 s, hung after the click"
+-- was wrong on both halves. It was non-responsive from the start, and it had
+not hung.
+
+**Automation coordinates must be DPI-corrected.** The first synthetic click
+attempt did nothing, and was wrongly written up as "synthetic input cannot
+reach the Flash GUI". The real cause is display scaling:
+
+- This machine runs at **125% scaling**.
+- `HovercraftUniverse.exe` is **DPI-unaware**, so Windows virtualizes it: the
+  1024x768 D3D9 render window it asks for is presented on screen at 1280x960.
+- A **DPI-unaware automation process** gets virtualized logical coordinates
+  from `GetWindowRect` (1040x807 including borders) while `CopyFromScreen` and
+  `SetCursorPos` operate in *physical* pixels. The two disagree by exactly
+  1.25x, so screenshots are misaligned and clicks land elsewhere.
+
+Fix: call `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`
+(fall back to `SetProcessDPIAware`) in the automation process before any
+coordinate call. After that the same query returns 1300x1009 at (640,290) --
+1.25x the earlier values -- and a capture matches what the user sees on screen.
+
+Two things about this are worth remembering beyond this session. First, a
+misaligned screenshot is a *coordinate* bug, not evidence about the
+application; the original write-up drew a conclusion about Hikari and Flash
+from what was purely a scaling error on the test harness side. Second, the
+correct diagnosis arrived from a human comparing the captured image against
+the real window -- so when automated observation and a human observation
+disagree, the automation is the thing to doubt first.
+
+The successful run reported in 9.1 was driven by a real human click. With the
+DPI fix in place, synthetic clicks should work; that has not yet been
+re-verified end to end.
+
+Still true and unresolved: `SetForegroundWindow` was observed failing to raise
+the window after it lost focus. That is independent of DPI and is consistent
+with Windows' foreground-lock rules plus the non-responsive message pump. If
+repeated automated testing is needed, a debug command-line flag that jumps
+straight to a game state is a better investment than fighting the window
+manager.
+
+### 9.3 There is no Start button -- and it is the same root cause
+
+A full-window screenshot shows the lobby laid out correctly: empty player
+table, settings panel (`Game Type` blank, `Track SimpleTrack2`, `Laps` blank,
+`Playercount 2`, `Fill with bots Yes`, an empty `Select hovercraft` dropdown),
+a working chat pane reading *"Welcome in the lobby"*, and on the right a single
+button: **`Leave Lobby`**. `Start` is absent.
+
+(An earlier draft of this section suspected the GUI was clipped by a too-small
+render window. That was an artifact of a narrower screen-region capture -- the
+real window shows everything laid out fine. There is no resolution problem.)
+
+`Start` is admin-only by design, and it is *never activated* because the client
+never learns it is the admin:
+
+```cpp
+// LobbyState.cpp:199 -> 144-146
+onAdminChange(mLobby->isAdmin());
+    -> mLobbyGUI->showStart(isAdmin);   // activateOverlay(mStart) only if true
+
+// Lobby.cpp:156-158
+bool Lobby::isAdmin() const {
+    return (mPlayers.getOwnPlayer() && mPlayers.getOwnPlayer()->getID() == mAdmin);
+}
+```
+
+Both operands fail, for the same root cause:
+
+1. `mPlayers.getOwnPlayer()` is null -- the client's own `PlayerSettings`
+   object only exists if it arrives as a dynamic node spawn, which is the
+   node-linking gap.
+2. `mAdmin` stays at its constructor value of `-1` (`Lobby.cpp:34`). It is a
+   replicated field (`addReplicationInt`, `AUTH_2_ALL`, `Lobby.cpp:355`), and
+   replication is a no-op. Server-side it *is* set correctly
+   (`Lobby.cpp:180`) -- that value just never crosses.
+
+So this is not a separate bug and needs no separate fix. It is the cleanest
+possible confirmation of the workstream C diagnosis: **the lobby is a fully
+working GUI driven by state that never arrives.** Implementing node linking
+plus the replication tick should make the player row, the admin marking, and
+the `Start` button all appear together.
+
+Useful corollary for testing: `Start` appearing at all is a precise, visible
+acceptance signal for the first half of workstream C -- no debugger needed.
+
+### 9.4 Net effect on the Phase B plan
+
+The ladder in [phase-b-plan.md](phase-b-plan.md) §2 held up, with steps 1-5
+confirmed working and the failure landing exactly where predicted -- at node
+linking. Two adjustments:
+
+- The client reaches `LobbyState` and renders the lobby, which the ladder
+  implied was gated behind step 6. It is not; only the lobby's *contents* are.
+  So there is more working infrastructure to build on than assumed.
+- Add the lobby GUI resolution question as a possible blocker independent of
+  workstreams C and D.

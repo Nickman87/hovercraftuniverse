@@ -101,7 +101,43 @@ sent as events (`RaceState::SystemState::sendEvent`,
 So events are second only to linking, and ahead of replication — they unlock the state machine,
 whereas replication only makes things *smooth*.
 
-**`eZCom_EventInit` needs verification before implementing.** The game relies on it to deliver
+**`eZCom_EventInit` — verified. Our reading was right.** See
+[zoidcom-original-semantics.md](zoidcom-original-semantics.md) for the full extracted
+reference. It fires **on the authority** when a new proxy/owner links up, confirmed two ways:
+by `setEventNotification`'s own header comment ("if a new proxy node connected"), and
+decisively by the game's original pre-shim production code
+([RaceState.cpp:411](../../HovercraftUniverse/HovercraftUniverse/RaceState.cpp)):
+
+```cpp
+if (type == eZCom_EventInit && mNode->getRole() == eZCom_RoleAuthority)
+```
+
+…followed by building a snapshot and `sendEventDirect()` to `conn_id`. The event's own
+bitstream carries no payload. One nuance: in the Zoidlevel-transition case the docs say it is
+received "on both nodes" — irrelevant here since we are not implementing Zoidlevels.
+
+Other findings from that extraction worth having in hand before writing code:
+
+- **`ZCom_cbNodeRequest_Unique` does not exist.** Only `_Dynamic` and `_Tag`, both returning
+  `void` with **no decline path** — failing to comply gets the connection disconnected by the
+  library. So unique-node linking is purely local class-ID matching, as assumed in §3.1.
+- **`ZCOM_REPRULE_PROXY_2_AUTH` does not exist** — only `OWNER_2_AUTH`. Anything expecting a
+  generic proxy→authority path is mistaken.
+- `mindelay`/`maxdelay` are **milliseconds, best-effort**, and explicitly *not enforced* for
+  `ZCom_ReplicatorAdvanced`.
+- `setAnnounceData` is set once but **re-evaluated per client** via `outPreReplicateNode()`
+  before each announcement; the receiver reads it inside `ZCom_cbNodeRequest_Dynamic/_Tag`.
+- `setOwner()` "won't do anything special on its own" — it is a pure permission gate.
+- `checkState()` is called once per `ZCom_processOutput()`, **not** once per connection.
+
+**And one real bug it found in our shim:** `registerNodeDynamic`
+([Node.cpp:112-116](../../compat/zoidcom/src/Node.cpp)) unconditionally assigns
+`eZCom_RoleAuthority`, but the real semantics require `eZCom_RoleProxy` when it is called
+from inside `ZCom_cbNodeRequest_Dynamic()`. Harmless today because no dynamic-spawn delivery
+exists — and a guaranteed source of confusion the moment step 1 below starts working, since
+every client-side entity would claim to be authoritative. **Fix it as part of step 1.**
+
+Original context, retained: the game relies on `eZCom_EventInit` to deliver
 a one-shot full-state snapshot to a newly-linked node — `Lobby`, `PlayerSettings` and
 `RaceState` each build their own snapshot inside an `InitEvent`
 ([Lobby.cpp:309-315](../../HovercraftUniverse/HovercraftUniverse/Lobby.cpp),
@@ -146,7 +182,34 @@ name + player ID, `PlayerSettings`' connection + user IDs, `RaceState`'s track f
 `ZCom_Node::setAnnounceData` currently accepts the stream and immediately deletes it
 ([Node.cpp:192-196](../../compat/zoidcom/src/Node.cpp)).
 
-### 3.4 `ZCom_ReplicatorAdvanced` dispatch
+### 3.4 Custom replicator dispatch — larger than it first appears
+
+The game reaches ZoidCom through its own wrappers in `NetworkEntity`, and **four of those
+wrappers do not use ZoidCom's primitive replication at all** — they construct game-authored
+`ZCom_Replicator` subclasses and hand them to `addReplicator`
+([NetworkEntity.cpp:110-126](../../HovercraftUniverse/Networking/NetworkEntity.cpp)):
+
+| Wrapper | Class | Base | Used for |
+|---------|-------|------|----------|
+| `replicateOgreVector3` | `OgreVector3_Replicator` | `ZCom_ReplicatorBasic` | **`mPosition`, `mVelocity`** on every entity |
+| `replicateOgreQuaternion` | `OgreQuaternion_Replicator` | `ZCom_ReplicatorBasic` | **`mOrientation`** on every entity |
+| `replicateString` | `String_Replicator` | `ZCom_ReplicatorBasic` | every `mDisplayName` / `mDescription` / `mPlayerName` |
+| — | `EntityPropertyMapReplicator` | `ZCom_ReplicatorAdvanced` | the property map on every entity |
+
+Only `replicateUnsignedInt` / `replicateFloat` / `addReplicationBool` use ZoidCom's built-in
+primitives.
+
+**This corrects the ordering assumption made earlier in planning.** Custom replicator dispatch
+is not a late refinement for the property map — it is *the* mechanism by which a hovercraft's
+position and orientation reach the client. Implementing the primitive replication tick alone
+would sync the lobby and the HUD numbers but leave every craft frozen at its spawn point.
+
+So step 3 of the implementation order must drive `ZCom_ReplicatorBasic`'s
+`checkState()` / `packData()` / `unpackData(stream, store, estimated_time_sent)` for
+`addReplicator`-registered instances, alongside the primitive paths. Verified against
+`OgreVector3_Replicator.h:67,76` — the subclasses implement exactly those virtuals.
+
+### 3.5 `ZCom_ReplicatorAdvanced` dispatch
 
 The game ships a hand-rolled `ZCom_ReplicatorAdvanced` subclass —
 `EntityPropertyMapReplicator` ([EntityPropertySystem.h:280-377](../../HovercraftUniverse/CoreEngine/EntityPropertySystem.h),
@@ -203,10 +266,13 @@ Strictly sequential — each step is only testable once the previous works.
    `eZCom_EventInit` — after confirming its semantics against the original headers.
    *Test:* lobby chat round-trips; clicking Start produces a countdown on the client; the
    `RaceState` machine advances past `INITIALIZING`.
-3. **Basic replication.** `ZCom_processReplicators` walking each node's registered fields, both
-   directions per rule.
-   *Test:* lobby player count and track selection sync; a hovercraft's replicated position
-   changes on the client.
+3. **Replication tick.** `ZCom_processReplicators` walking each node's registered fields, both
+   directions per rule — covering **both** the primitive paths (`addReplicationInt` / `Float` /
+   `Bool`) **and** `ZCom_ReplicatorBasic` subclasses registered via `addReplicator`
+   (`checkState` / `packData` / `unpackData`). Per §3.4 the latter is what actually moves
+   position and orientation, so it is not separable from this step.
+   *Test:* lobby player count and track selection sync (primitive path); a hovercraft's
+   position changes on the client (custom path).
 4. **`ZCom_ReplicatorAdvanced`.** Drive the property-map virtuals.
    *Test:* `SpeedBoost::onLeave`'s property removal ([SpeedBoost.cpp:64](../../HovercraftUniverse/HovercraftUniverse/SpeedBoost.cpp)) propagates.
 5. **`setOwner`.** Currently a no-op ([Node.cpp:184-188](../../compat/zoidcom/src/Node.cpp)),
@@ -217,7 +283,62 @@ Strictly sequential — each step is only testable once the previous works.
 
 Steps 1–2 get to a race *starting*. Steps 3–5 make it work.
 
-## 6. Acceptance criteria
+## 6. Implementation hazards
+
+Found while reading the shim and the game's networking layer. Both are cheap to get right up
+front and unpleasant to debug later.
+
+### 6.1 Server and client share one process in single-player
+
+Because `onSingleplayer` runs the server on a thread in the same process, **two
+`ZCom_Control` instances live in one address space** — and any shim state that is `static` or
+file-global is silently shared between them.
+
+`Node.cpp` already has one such global:
+
+```cpp
+// compat/zoidcom/src/Node.cpp:29
+std::atomic<ZCom_NodeID> gNextNetworkId(1);
+```
+
+Today that is harmless — only authority nodes allocate IDs, and only the server creates them.
+It stops being harmless the moment Phase B adds a node registry: **the network-ID space,
+the registry, and any pending-link bookkeeping must live in `ZCom_Control_Private`, not at
+file scope.** A shared registry would let the client resolve a network ID to the *server's*
+node object and replicate into it directly — which would appear to work in single-player and
+fail utterly over a real network. That is the worst possible failure mode: the bug hides
+exactly where testing is easiest.
+
+Corollary for testing: **a genuine two-process test is mandatory**, not optional polish. Any
+single-player-only validation of this workstream is untrustworthy by construction.
+
+`zshim::todoPhaseBOnce`'s log-once state is fine to keep global — one message per process is
+the desired behaviour.
+
+### 6.2 A latent bug in `networkRegisterUnique`
+
+[NetworkEntity.cpp:55-58](../../HovercraftUniverse/Networking/NetworkEntity.cpp):
+
+```cpp
+void NetworkEntity::networkRegisterUnique(NetworkIDManager* idmanager, std::string name,
+        bool authority) {
+    networkRegisterUnique(idmanager->getID(name), idmanager->getControl());
+    //                                                    ^ `authority` is dropped
+}
+```
+
+The `authority` argument is silently discarded and the two-argument call falls back to the
+default. This is currently **harmless by luck**: the only caller of this overload is
+`HUClient.cpp:58`, which wants proxy behaviour and passes nothing, while the server registers
+its `Lobby` through the other overload with an explicit `true`
+([HUServerCore.cpp:31](../../HovercraftUniverse/HovercraftUniverse/HUServerCore.cpp)).
+
+Leave it alone for now — it is pre-existing 2010 behaviour and fixing it changes nothing
+observable. But note it here, because once node linking works, a future caller passing
+`true` would get a proxy and the resulting "unique node never becomes authority" symptom
+would look exactly like a linking bug in our new code.
+
+## 7. Acceptance criteria
 
 - Single-player: menu → lobby with the local player listed → Start → countdown → `RACING`,
   with a hovercraft spawned, owned, and responding to input.
@@ -227,7 +348,7 @@ Steps 1–2 get to a race *starting*. Steps 3–5 make it work.
 - Chat works in lobby and in race — cheap, and it exercises events end to end independently of
   gameplay.
 
-## 7. Deliberately out of scope
+## 8. Deliberately out of scope
 
 Not needed for racing, left stubbed and logged:
 

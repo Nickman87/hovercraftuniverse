@@ -100,9 +100,10 @@ Established by source trace; this is the ladder Phase B has to climb.
 | 3 | Client dials `localhost` | `HUClient` → `ZCom_Connect` over ENet | ✅ ENet transport is real |
 | 4 | Server accepts | `ZCom_cbConnectionRequest` → `Lobby::onConnectAttempt` | ✅ |
 | 5 | Server spawns `PlayerSettings` | `ZCom_cbConnectionSpawned` → `Lobby::onConnect` | ✅ server-side object exists |
+| 5b | **Client enters `LobbyState` and renders the lobby GUI** | `MainMenuState::finishConnect` → `switchState(LOBBY)` | ✅ **confirmed working** (see below) |
 | 6 | **Client is asked to build the proxy objects** | `ZCom_cbNodeRequest_Dynamic` → `HUClient::onNodeDynamic` | ❌ **never invoked — no node linking** |
 | 7 | Lobby state syncs to client | replicated `mTrack`/`mAdmin`/`mCurrentPlayers` | ❌ replication tick is a no-op |
-| 8 | Click Start | `LobbyState::onPressStart` → `Lobby::start()` → `StartTrackEvent` | ❌ events are dropped on send |
+| 8 | Click Start | `LobbyState::onPressStart` → `Lobby::start()` → `StartTrackEvent` | ❌ **the Start button is never even shown** — it is admin-only, and admin status is replicated |
 | 9 | Server builds `RaceState`, loads track | `Lobby::process` → `new RaceState(...)` → `mLoader->load(trackfile)` | ❌ never reached |
 | 10 | Client enters `InGameState` | `LobbyState::onStart` → `switchState(IN_GAME)` | ❌ never reached |
 | 11 | Race state machine advances | `INITIALIZING→LOADING→INTRO→COUNTDOWN→RACING`, driven by client acks over events | ❌ events |
@@ -112,6 +113,24 @@ Established by source trace; this is the ladder Phase B has to climb.
 
 Steps 6–11, 13 and 14 are ZoidCom. Step 12 is Havok. **That ratio is why ZoidCom is the
 larger workstream and goes first.**
+
+### Confirmed empirically (workstream A, [first-run.md §9](first-run.md))
+
+The ladder above was written from source reading; it has since been driven for real. Steps
+1–5b all work, and the failure lands exactly at step 6 as predicted. Two refinements:
+
+- **The client does reach `LobbyState` and renders a complete, working lobby GUI** — player
+  table, settings panel, chat pane, `Leave Lobby` button. There is more working
+  infrastructure to build on than the ladder implied; only the lobby's *contents* are gated
+  behind step 6.
+- **The lobby is a working GUI driven by state that never arrives.** The player table is
+  empty, and the `Start` button is absent entirely — it is admin-only, and `Lobby::isAdmin()`
+  needs both the client's own `PlayerSettings` (a dynamic node spawn) and the replicated
+  `mAdmin` field, so it fails twice over for the same root cause.
+
+That last point gives workstream C a precise, visible acceptance signal needing no debugger:
+**when node linking and replication work, the player row, the admin marking, and the `Start`
+button should all appear together.**
 
 ---
 
@@ -255,9 +274,9 @@ buried.
 
 | Workstream | Status |
 |------------|--------|
-| A. Smoke test | in progress |
-| B. Asset fixes | in progress |
-| C. ZoidCom Phase B | not started |
+| A. Smoke test | ✅ done — see [first-run.md §9](first-run.md) |
+| B. Asset fixes | ✅ done — commit `e761514` |
+| C. ZoidCom Phase B | in progress |
 | D. Collision reconstruction | not started |
 | E. Physics tuning / 60 Hz validation | not started |
 | F. Optional polish | not started |
