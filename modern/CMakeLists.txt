@@ -27,8 +27,14 @@ project(HovercraftUniverseModern CXX)
 #   - Still vendored separately, NOT from vcpkg (pending): Lua 5.1 (vcpkg's
 #     `lua` port is 5.5, too new for the game's Lua 5.1-era scripts and
 #     LuaBind), LuaBind (no vcpkg port; a maintained deboostified fork will be
-#     vendored), and Hikari (built from archived source). Havok and ZoidCom
-#     remain out of scope for this modern tree for now.
+#     vendored), and Hikari (built from archived source). Havok remains out
+#     of scope for this modern tree for now.
+#   - ZoidCom: the real vendor library is dead (vendor gone, only VC9
+#     binaries survive) so it is replaced by an in-repo, API-compatible
+#     shim, hu_zoidcom_compat (compat/zoidcom/**), built from source and
+#     linked against ENet (vcpkg's `enet` port, exposed as the
+#     unofficial-enet CMake config package). See
+#     docs/porting/zoidcom-compat.md for what's real vs. stubbed.
 # -------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 17)
@@ -198,6 +204,78 @@ target_link_libraries(hu_ogremax PUBLIC
     OgreOverlay
 )
 
+# --- hu_zoidcom_compat -----------------------------------------------------
+# API-compatible, from-scratch replacement for the dead closed-source
+# ZoidCom networking library (compat/zoidcom/**, owned by this porting
+# effort -- not a port of anything under HovercraftUniverse/). See
+# docs/porting/zoidcom-compat.md.
+add_subdirectory(${CMAKE_SOURCE_DIR}/../compat/zoidcom ${CMAKE_BINARY_DIR}/compat_zoidcom)
+
+# --- hu_networking -----------------------------------------------------
+# Ported (in place, not copied) from HovercraftUniverse/Networking/*.cpp/.h --
+# the faithful VC9 conversion tracked by HovercraftUniverse/Networking/CMakeLists.txt
+# (source list mirrored from there; that file is NOT modified). Builds
+# against hu_zoidcom_compat instead of the real (dead) ZoidCom prebuilt lib.
+set(HU_NETWORKING_ROOT ${HU_ROOT}/Networking)
+
+add_library(hu_networking STATIC
+    ${HU_NETWORKING_ROOT}/OgreQuaternion_Replicator.cpp
+    ${HU_NETWORKING_ROOT}/OgreVector3_Replicator.cpp
+    ${HU_NETWORKING_ROOT}/String_Replicator.cpp
+    ${HU_NETWORKING_ROOT}/ChatClient.cpp
+    ${HU_NETWORKING_ROOT}/ChatEntity.cpp
+    ${HU_NETWORKING_ROOT}/ChatEvent.cpp
+    ${HU_NETWORKING_ROOT}/ChatEventParser.cpp
+    ${HU_NETWORKING_ROOT}/ChatServer.cpp
+    ${HU_NETWORKING_ROOT}/NotifyEvent.cpp
+    ${HU_NETWORKING_ROOT}/TextEvent.cpp
+    ${HU_NETWORKING_ROOT}/NetworkClient.cpp
+    ${HU_NETWORKING_ROOT}/NetworkEntity.cpp
+    ${HU_NETWORKING_ROOT}/NetworkIDManager.cpp
+    ${HU_NETWORKING_ROOT}/NetworkServer.cpp
+
+    ${HU_NETWORKING_ROOT}/OgreQuaternion_Replicator.h
+    ${HU_NETWORKING_ROOT}/OgreVector3_Replicator.h
+    ${HU_NETWORKING_ROOT}/String_Replicator.h
+    ${HU_NETWORKING_ROOT}/ChatClient.h
+    ${HU_NETWORKING_ROOT}/ChatEntity.h
+    ${HU_NETWORKING_ROOT}/ChatEvent.h
+    ${HU_NETWORKING_ROOT}/ChatEventParser.h
+    ${HU_NETWORKING_ROOT}/ChatEventType.h
+    ${HU_NETWORKING_ROOT}/ChatListener.h
+    ${HU_NETWORKING_ROOT}/ChatServer.h
+    ${HU_NETWORKING_ROOT}/NotifyEvent.h
+    ${HU_NETWORKING_ROOT}/TextEvent.h
+    ${HU_NETWORKING_ROOT}/NetworkClient.h
+    ${HU_NETWORKING_ROOT}/NetworkEntity.h
+    ${HU_NETWORKING_ROOT}/NetworkEvent.h
+    ${HU_NETWORKING_ROOT}/NetworkEventImpl.h
+    ${HU_NETWORKING_ROOT}/NetworkEventParser.h
+    ${HU_NETWORKING_ROOT}/NetworkIDManager.h
+    ${HU_NETWORKING_ROOT}/NetworkServer.h
+)
+
+target_include_directories(hu_networking PUBLIC
+    ${HU_NETWORKING_ROOT}
+    ${HU_ROOT}/Utils
+)
+
+find_package(OGRE CONFIG REQUIRED)
+
+target_compile_definitions(hu_networking PRIVATE
+    WIN32
+    _LIB
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CONFIG:Release>:NDEBUG>
+)
+
+target_link_libraries(hu_networking PUBLIC
+    hu_zoidcom_compat
+    hu_exceptions
+    hu_utils
+    OgreMain
+)
+
 # --- hu_coreengine ---------------------------------------------------------
 # Ported (in place, not copied) from HovercraftUniverse/CoreEngine/*.cpp/.h --
 # the faithful VC9 conversion tracked by HovercraftUniverse/CoreEngine/CMakeLists.txt
@@ -231,12 +309,14 @@ target_link_libraries(hu_ogremax PUBLIC
 #     full, so it is blocked too despite GameStateManager.h itself only
 #     forward-declaring BasicGameState.
 #
-# Net effect: of the 22 .cpp files in CoreEngine.vcproj, only 9 are free of
-# GUI/Networking/Sound/ZoidCom taint and are built below. The remaining 13 are
-# excluded with per-file TODO(modernize) comments. See the porting report for
-# the full rationale; nothing here silently drops functionality -- every
-# excluded file still exists on disk, untouched, ready to be re-added once its
-# blocking project is ported.
+# Net effect (UPDATED once hu_zoidcom_compat + hu_networking exist, see
+# above): of the 22 .cpp files in CoreEngine.vcproj, the ones tainted only
+# by Networking/ZoidCom (not by GUI/Sound) are now re-added below. Only
+# files that still transitively pull in <GUIManager.h>/<SoundManager.h>
+# (GUI/Sound projects, not ported yet) remain excluded. See the porting
+# report (docs/porting/zoidcom-compat.md) for the full rationale; nothing
+# here silently drops functionality -- every excluded file still exists on
+# disk, untouched, ready to be re-added once its blocking project is ported.
 set(HU_COREENGINE_ROOT ${HU_ROOT}/CoreEngine)
 
 add_library(hu_coreengine STATIC
@@ -250,6 +330,17 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/DedicatedServer.cpp
     ${HU_COREENGINE_ROOT}/EntityMapping.cpp
 
+    # Re-enabled now that hu_zoidcom_compat/hu_networking exist (previously
+    # blocked purely by Networking/ZoidCom #include taint; verified to
+    # compile clean against the shim -- see docs/porting/zoidcom-compat.md
+    # for the up to date accounting):
+    ${HU_COREENGINE_ROOT}/FreeroamCameraController.cpp
+    ${HU_COREENGINE_ROOT}/BasicEntityEvent.cpp
+    ${HU_COREENGINE_ROOT}/ControllerEvent.cpp
+    ${HU_COREENGINE_ROOT}/ControllerEventParser.cpp
+    ${HU_COREENGINE_ROOT}/Entity.cpp
+    ${HU_COREENGINE_ROOT}/EntityManager.cpp
+
     ${HU_COREENGINE_ROOT}/CameraSpring.h
     ${HU_COREENGINE_ROOT}/InputManager.h
     ${HU_COREENGINE_ROOT}/KeyManager.h
@@ -261,45 +352,6 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/DedicatedServer.h
     ${HU_COREENGINE_ROOT}/EntityMapping.h
     ${HU_COREENGINE_ROOT}/EntityResource.h
-
-    # TODO(modernize): FreeroamCameraController.cpp/.h -- Controller.h ->
-    # ControllerEvent.h -> NetworkEvent.h (HovercraftUniverse/Networking, not
-    # yet ported). Re-add once Networking is ported.
-    # TODO(modernize): RaceCamera.cpp/.h -- includes FreeroamCameraController.h
-    # (same Networking taint, transitively). Its CCS (CCSCameraControlSystem)
-    # includes are already dead-commented in the original source, not a factor.
-    # TODO(modernize): BasicGameState.cpp/.h -- includes <GUIManager.h> and
-    # <SoundManager.h> directly (GUI, Sound projects, not yet ported).
-    # TODO(modernize): GameStateManager.cpp -- #includes "BasicGameState.h" in
-    # full (GUI/Sound taint above). GameStateManager.h itself only
-    # forward-declares BasicGameState and has no other blocker, but its .cpp
-    # cannot build without BasicGameState's full definition.
-    # TODO(modernize): BasicEntityEvent.cpp/.h -- includes ControllerEvent.h ->
-    # NetworkEvent.h (Networking, not yet ported).
-    # TODO(modernize): ControllerEvent.cpp/.h -- includes NetworkEvent.h
-    # (Networking, not yet ported).
-    # TODO(modernize): ControllerEventParser.cpp/.h -- includes
-    # NetworkEventParser.h (Networking, not yet ported).
-    # TODO(modernize): Entity.cpp/.h -- derives from NetworkEntity and includes
-    # "NetworkEntity.h" (Networking) directly; also takes ZCom_BitStream*/
-    # eZCom_Event (ZoidCom, prebuilt proprietary lib) in its API.
-    # TODO(modernize): EntityManager.cpp/.h -- includes Entity.h (tainted above).
-    # TODO(modernize): EntityPropertySystem.cpp/.h -- includes
-    # <zoidcom/zoidcom.h> directly (ZoidCom, not ported/available for this
-    # toolchain) and <boost/thread/mutex.hpp> (available, not the blocker).
-    # TODO(modernize): EntityRepresentation.cpp/.h -- includes Entity.h
-    # (tainted above).
-    # TODO(modernize): RepresentationManager.cpp/.h -- includes
-    # EntityManager.h/EntityRepresentation.h/GameView.h (Entity.h-tainted) and
-    # <GUIManager.h>/<SoundManager.h> directly (GUI, Sound, not yet ported).
-    # TODO(modernize): Application.cpp/.h -- includes EntityManager.h/
-    # RepresentationManager.h (tainted above) and <GUIManager.h>/
-    # <SoundManager.h> directly (GUI, Sound, not yet ported).
-    # TODO(modernize): GameView.cpp/.h -- includes EntityRepresentation.h
-    # (tainted above) and RaceCamera.h (Networking-tainted, see above).
-    #
-    # Inert (header-only, no matching .cpp in CoreEngine.vcproj, kept for
-    # source-list parity even though nothing here #includes them):
     ${HU_COREENGINE_ROOT}/Controller.h
     ${HU_COREENGINE_ROOT}/ControllerActionType.h
     ${HU_COREENGINE_ROOT}/ControllerEvent.h
@@ -307,16 +359,58 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/ControllerEventType.h
     ${HU_COREENGINE_ROOT}/Entity.h
     ${HU_COREENGINE_ROOT}/EntityManager.h
+    ${HU_COREENGINE_ROOT}/FreeroamCameraController.h
+    ${HU_COREENGINE_ROOT}/BasicEntityEvent.h
+
+    # TODO(modernize): still excluded, but NOT for ZoidCom/Networking reasons
+    # anymore -- the shim resolves that taint. Two independent kinds of
+    # blocker remain, both out of scope for this task (compat/zoidcom/**
+    # and modern/CMakeLists.txt are owned here; HovercraftUniverse/** is
+    # read-only). Confirmed by actually attempting to compile each file
+    # against hu_zoidcom_compat/hu_networking:
+    #
+    #   (A) Pre-existing Ogre API-gap breakage (see docs/porting/ogre-api-gap.md
+    #       for the same class of issue elsewhere), independent of this task:
+    #     - RaceCamera.cpp/.h -- calls Ogre::Camera::setPosition/setDirection/
+    #       lookAt/setFixedYawAxis/pitch/yaw/roll/getOrientation/getPosition,
+    #       none of which exist anymore on Ogre::Camera in Ogre 14.5.2 (Camera
+    #       no longer derives from Frustum/MovableObject the same way; those
+    #       calls now go through Camera::getParentSceneNode() or similar).
+    #     - GameView.cpp/.h -- includes RaceCamera.h (same breakage,
+    #       transitively) and additionally calls Ogre::Light::setPosition(),
+    #       also removed/moved in modern Ogre.
+    #     - EntityPropertySystem.cpp/.h -- includes <zoidcom/zoidcom.h>, which
+    #       now resolves fine, but EntityPropertySystem.cpp itself uses
+    #       std::cout (lines ~239/252/262) without #include <iostream> --
+    #       a latent, pre-existing bug in this file, unrelated to ZoidCom.
+    #
+    #   (B) Still GUI/Sound-tainted (unchanged from before this task):
+    #     - EntityRepresentation.cpp/.h -- includes Entity.h (no longer
+    #       tainted) but EntityRepresentation.cpp ALSO directly #includes
+    #       "Application.h", which pulls in <GUIManager.h>/<SoundManager.h>
+    #       (GUI, Sound projects, not yet ported).
+    #     - BasicGameState.cpp/.h -- includes <GUIManager.h> and <SoundManager.h> directly.
+    #     - GameStateManager.cpp -- #includes "BasicGameState.h" in full (GUI/Sound
+    #       taint above). GameStateManager.h itself only forward-declares
+    #       BasicGameState and has no other blocker, but its .cpp cannot build
+    #       without BasicGameState's full definition.
+    #     - RepresentationManager.cpp/.h -- includes EntityManager.h/
+    #       EntityRepresentation.h/GameView.h (still tainted per (A)/(B) above)
+    #       AND <GUIManager.h>/<SoundManager.h> directly (GUI, Sound, not yet ported).
+    #     - Application.cpp/.h -- includes EntityManager.h/RepresentationManager.h
+    #       (RepresentationManager still tainted) and <GUIManager.h>/
+    #       <SoundManager.h> directly (GUI, Sound, not yet ported).
+    #
+    # Inert (header-only, no matching .cpp in CoreEngine.vcproj, kept for
+    # source-list parity even though nothing here #includes them):
     ${HU_COREENGINE_ROOT}/EntityPropertySystem.h
     ${HU_COREENGINE_ROOT}/EntityRepresentation.h
-    ${HU_COREENGINE_ROOT}/FreeroamCameraController.h
-    ${HU_COREENGINE_ROOT}/GameStateManager.h
     ${HU_COREENGINE_ROOT}/GameView.h
     ${HU_COREENGINE_ROOT}/RaceCamera.h
+    ${HU_COREENGINE_ROOT}/GameStateManager.h
     ${HU_COREENGINE_ROOT}/RepresentationManager.h
     ${HU_COREENGINE_ROOT}/Application.h
     ${HU_COREENGINE_ROOT}/BasicGameState.h
-    ${HU_COREENGINE_ROOT}/BasicEntityEvent.h
     # NOTE: MenuView.h is listed for parity but has a real latent bug inherited
     # from the original source: it reuses BasicView.h's include guard
     # (`#define _BASICVIEW_H`), a copy-paste mistake. If anything ever
@@ -334,6 +428,12 @@ add_library(hu_coreengine STATIC
 # so the ois/ subdirectory itself must be on the include path.
 find_path(HU_OIS_INCLUDE_DIR NAMES OIS.h PATH_SUFFIXES ois)
 find_library(HU_OIS_LIBRARY NAMES OIS)
+
+# EntityPropertySystem.cpp/.h (re-enabled above) uses boost::mutex
+# (<boost/thread/mutex.hpp>), which is a genuine, non-portable-fix-able
+# dependency, same as hu_utils's Boost usage above. boost-thread is part of
+# the vcpkg package set scripts/bootstrap-modern-deps.ps1 installs.
+find_package(Boost REQUIRED COMPONENTS thread)
 
 target_include_directories(hu_coreengine PUBLIC
     ${HU_COREENGINE_ROOT}
@@ -362,4 +462,7 @@ target_link_libraries(hu_coreengine PUBLIC
     ${HU_OIS_LIBRARY}
     hu_utils
     hu_exceptions
+    hu_networking
+    hu_zoidcom_compat
+    Boost::thread
 )
