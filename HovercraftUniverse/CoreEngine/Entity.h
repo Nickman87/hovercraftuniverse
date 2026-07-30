@@ -6,9 +6,31 @@
 #include "NetworkEntity.h"
 #include "ControllerEvent.h"
 #include <OgreLogManager.h>
-#include "CameraSpring.h"
 
 namespace HovUni {
+
+// Smoothing tuning constants for Entity::update()'s render-side position
+// correction (dt-aware, frame-rate-independent). See the "Rendering
+// decoupled from physics" section of docs/porting/timing-and-smoothing.md.
+//
+// Time constant (seconds) of the critically-damped exponential blend used to
+// correct mTmpPosition towards a freshly-arrived authoritative mPosition,
+// instead of snapping to it. Smaller = snappier/more responsive correction,
+// larger = smoother but more "laggy" visually. 0.08s was chosen as a starting
+// point (roughly 1-2 physics ticks at 60 Hz) that should be imperceptible as
+// lag but still avoid any visible pop; needs real-game confirmation once the
+// executable links (see report caveats).
+const float HU_ENTITY_SMOOTH_TAU = 0.08f;
+
+// If the authoritative position differs from the current visual position by
+// more than this distance (world units), treat it as a deliberate large jump
+// (teleport / respawn-to-checkpoint / portal traversal) rather than a normal
+// small physics correction, and snap immediately instead of smoothing --
+// otherwise a respawn would visibly slide the entity across the level.
+// This value is a first estimate and should be validated/tuned once the game
+// can actually run (portals and checkpoint resets need to be observed to make
+// sure ordinary corrections never exceed it and real teleports always do).
+const float HU_ENTITY_TELEPORT_THRESHOLD = 15.0f;
 
 class EntityPropertyMap;
 
@@ -38,7 +60,14 @@ protected:
 	/** Value to check for position change */
 	Ogre::Vector3 mLastPosition;
 
-	/** Temp position */
+	/**
+	 * The rendered/visual position: dead-reckoned every frame from mVelocity and
+	 * smoothly corrected (never snapped, except on large teleport-sized jumps)
+	 * towards mPosition whenever a new authoritative value arrives. This is what
+	 * rendering should read every frame -- it is frame-rate independent and
+	 * decoupled from the physics tick rate. See Entity::update() and
+	 * docs/porting/timing-and-smoothing.md.
+	 */
 	Ogre::Vector3 mTmpPosition;
 
 	/** The linear velocity (Dirk)*/
@@ -64,9 +93,6 @@ protected:
 
 	/** Should the controls be processed or not? */
 	static bool mControlsActive;
-
-	/** Interpolator for the position of the hovercraft */
-	CameraSpring mSpringInterpolator;
 
 public:
 
@@ -183,16 +209,23 @@ public:
 	Ogre::String getCategory() const;
 
 	/**
-	 * Returns the position of this entity.
+	 * Returns the rendered/visual position of this entity (mTmpPosition):
+	 * dead-reckoned and smoothly corrected every frame, decoupled from the
+	 * physics tick rate. This is what rendering, cameras and effects should
+	 * call every frame -- it is what makes motion look smooth at high refresh
+	 * rates even though physics only updates at its own (lower, fixed) rate.
 	 *
-	 * @return the position
+	 * @return the smoothed, frame-rate-independent visual position
 	 */
 	Ogre::Vector3 getPosition() const;
 
 	/**
-	 * Returns a smoothed position of this entity.
+	 * Currently identical to getPosition() (both return mTmpPosition); kept as
+	 * a distinct, semantically-named accessor for callers that specifically
+	 * want "the smoothed position" as opposed to raw physics state, in case
+	 * the two are ever given different smoothing behaviour in the future.
 	 *
-	 * @return The smoothed position
+	 * @return the smoothed position
 	 */
 	Ogre::Vector3 getSmoothPosition() const;
 

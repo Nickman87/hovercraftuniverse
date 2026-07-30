@@ -710,4 +710,8 @@ target_link_libraries(hu_game_physics PUBLIC
     OgreOverlay
     Boost::thread
     Boost::random
+    # winmm: timeBeginPeriod/timeEndPeriod, used by HavokThread.cpp's physics
+    # timing loop (see docs/porting/timing-and-smoothing.md) to raise Windows
+    # timer granularity so Sleep() is accurate enough for a 60 Hz+ physics tick.
+    winmm
 )

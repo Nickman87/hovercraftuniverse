@@ -7,12 +7,34 @@
 #include "Exception.h"
 #include <exception>
 
+// timeBeginPeriod/timeEndPeriod: raise the Windows system timer granularity for
+// the lifetime of the physics thread. Without this, Sleep() only wakes up on
+// ~15.6 ms boundaries, which made the shipped "30 Hz" (Sleep(33)) actually
+// overshoot to roughly 21 Hz, and makes 60/144 Hz targets unreachable via
+// Sleep() alone. See docs/porting/timing-and-smoothing.md.
+#include <timeapi.h>
+#pragma comment(lib, "winmm.lib")
+
 namespace {
 
 	struct LoadParameter {
 		HovUni::Loader * loader;
 		const char * file;
 	};
+
+	// How far behind the deadline schedule is allowed to drift (in multiples of
+	// the physics step dt) before we give up trying to catch up and simply
+	// resynchronize to "now" instead. Without this clamp, a hitch (e.g. a debugger
+	// break, a GC-like stall, or a slow frame) would otherwise cause the loop to
+	// run many steps back-to-back trying to catch up -- a death spiral where the
+	// simulation falls further and further behind while burning 100% CPU.
+	const double HU_PHYSICS_MAX_CATCHUP_STEPS = 4.0;
+
+	// When Sleep()-ing towards the deadline, stop sleeping this many milliseconds
+	// early and short-spin the remainder. This leaves margin for Sleep()'s own
+	// scheduling slop (still present even at 1 ms timer granularity) so we land
+	// on the deadline instead of consistently overshooting it.
+	const double HU_PHYSICS_SLEEP_MARGIN_MS = 2.0;
 
 }
 
@@ -85,19 +107,64 @@ DWORD WINAPI runHavok( LPVOID lpParam ) {
 		//notify that the world has loaded
 		SetEvent(HavokThread::startevent);
 
-		// A stopwatch for waiting until the real time has passed
-		//hkStopwatch stopWatch;
-		//stopWatch.start();
-		//hkReal lastTime = stopWatch.getElapsedSeconds();
+		// Physics timing loop: a QueryPerformanceCounter-based deadline
+		// accumulator. This replaces the original Sleep(dt*1000)-after-step
+		// approach (see docs/porting/timing-and-smoothing.md for the full
+		// writeup), which had two problems: (1) default ~15.6ms Windows timer
+		// granularity meant Sleep(33) actually took ~47ms, so the shipped
+		// "30 Hz" ran at roughly 21 Hz; and (2) sleeping a fixed duration AFTER
+		// stepping makes the real period dt + step_cost, drifting under load.
+		//
+		// timeBeginPeriod(1) below raises timer granularity to ~1ms for the life
+		// of this thread so Sleep() is precise enough to hit 60/144 Hz targets.
+		timeBeginPeriod(1);
+
+		LARGE_INTEGER frequency;
+		QueryPerformanceFrequency(&frequency);
+
+		const double dt = (double) world->getTimeStep();
+		const double dtMs = dt * 1000.0;
+
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		double nextDeadlineMs = (double) now.QuadPart * 1000.0 / (double) frequency.QuadPart;
 
 		while ( HavokThread::run ) {
 			world->step();
 
-			Sleep( world->getTimeStep() * 1000 );
-			// Pause until the actual time has passed
-			//while (stopWatch.getElapsedSeconds() < lastTime + world.getTimeStep());
-			//	lastTime += world.getTimeStep();			
+			nextDeadlineMs += dtMs;
+
+			QueryPerformanceCounter(&now);
+			double nowMs = (double) now.QuadPart * 1000.0 / (double) frequency.QuadPart;
+
+			// Catch-up clamp: if we've fallen behind by more than a few steps
+			// (e.g. a stall stole a chunk of wall-clock time), resync to "now"
+			// instead of trying to burn through a backlog of steps -- avoids a
+			// death spiral where the loop can never catch up under load.
+			if (nowMs - nextDeadlineMs > HU_PHYSICS_MAX_CATCHUP_STEPS * dtMs) {
+				nextDeadlineMs = nowMs;
+			}
+
+			// Sleep for the bulk of the remaining time, leaving a small margin,
+			// then short-spin (yielding the core) until the exact deadline.
+			for (;;) {
+				QueryPerformanceCounter(&now);
+				nowMs = (double) now.QuadPart * 1000.0 / (double) frequency.QuadPart;
+
+				double remainingMs = nextDeadlineMs - nowMs;
+				if (remainingMs <= 0.0) {
+					break;
+				}
+
+				if (remainingMs > HU_PHYSICS_SLEEP_MARGIN_MS) {
+					Sleep( (DWORD) (remainingMs - HU_PHYSICS_SLEEP_MARGIN_MS) );
+				} else {
+					YieldProcessor();
+				}
+			}
 		}
+
+		timeEndPeriod(1);
 
 		delete world;
 	} catch (HovUni::Exception & e) {

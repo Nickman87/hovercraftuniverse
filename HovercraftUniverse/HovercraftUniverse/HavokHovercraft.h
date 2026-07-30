@@ -82,9 +82,20 @@ private:
  	hkVector4 mSide;
 	hkVector4 mForward;	
 
+	// mRotationDelta and mAngularGain are normalized in the constructor against
+	// HU_PHYSICS_REFERENCE_RATE (see HavokHovercraft.cpp) so that the tuning
+	// values authored at 30 Hz in engine_settings.cfg keep the same *feel*
+	// regardless of the physics step rate actually configured ([Havok] Framerate).
 	const float mRotationDelta;
+	// [Movement] Damping is read into mSpeedDamping for historical/config-compat
+	// reasons but is NOT used anywhere in the simulation (verified: no reader of
+	// this member exists). Left in place intentionally; do not "fix" this by
+	// wiring it up without checking whether that changes the original feel.
 	const float mSpeedDamping;
 	const float mCharacterGravity;
+	// Per-step orientation correction gain, normalized (rate-exponential) from the
+	// original fixed 0.25f-per-30Hz-step gain. See HavokHovercraft.cpp constructor.
+	const float mAngularGain;
 
 	/** Counter of the current amount of active collision events */
 	int mCollisionCounter;

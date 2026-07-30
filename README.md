@@ -140,6 +140,14 @@ Execution order:
 4. **Havok → Jolt** *(on hold)* — the long pole: physics port + collision-from-mesh pipeline + feel tuning against the reference build.
 5. Later options: x64 (requires replacing Flash.ocx with Ruffle first), FMOD Core, D3D11/GL3+ renderers.
 
+**Deliberate remaster-side change:** the physics tick was raised from the
+original 30 Hz to 60 Hz, with per-step tuning constants re-derived against a
+documented 30 Hz reference so the feel doesn't drift, and rendering was
+decoupled from the physics tick (dt-aware smoothing instead of snapping) so
+motion stays smooth on high-refresh displays. This is explicitly *not*
+faithful-port behavior — see `docs/porting/timing-and-smoothing.md` for the
+full rationale, math and compile-only verification status.
+
 ### Phase 3 (original sketch) — replace dead components
 
 Only two components are genuinely *dead* rather than merely old. If long-term sustainability matters more than binary fidelity, replace them one at a time, validating against the Phase-1 build:
