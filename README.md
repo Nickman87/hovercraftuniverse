@@ -84,14 +84,20 @@ The `HovercraftUniverse/dependencies/` folder is **not in the repository** — i
 - **Code: complete.** Full source of the v1.0 game as migrated from SVN (2 commits: initial + "migration from google code"). No known unfinished refactors; the wiki TODO list shows v1.0 shipped with only minor open issues.
 - **Binary assets: currently unavailable via git, but fully recovered locally.** 557 files (all `.mesh` models, `.png`/`.jpg` textures, `.swf` GUI files, `.hkx` physics, `.max` sources, design docs — see `.gitattributes`) are stored in **Git LFS, and the LFS budget for this GitHub account is exhausted**. A fresh clone gets ~130-byte pointer stubs instead of real files (clone with `GIT_LFS_SKIP_SMUDGE=1` to avoid checkout errors). All 557 files have since been restored from the Google Code Archive's SVN source dump and verified byte-identical against their committed LFS SHA256 hashes; the corresponding objects now live in `.git/lfs/objects` and can be re-pushed with `git lfs push --all origin` once the LFS budget is restored. The archive packages themselves are mirrored in the untracked `archive-mirror/` folder (SHA1-verified against the archive metadata) pending upload as a GitHub Release.
 - **Dependencies: not in repo** (see table above) — recoverable from the Google Code Archive.
-- **Buildability on modern machines: not out of the box.** The solution is in VS2008 `.vcproj` format (modern Visual Studio cannot even open it without conversion), and the two most important closed-source libraries (Havok, ZoidCom) are C++ static/import libraries compiled with VC9, which a modern MSVC toolchain cannot link.
+- **Buildability on modern machines: not out of the box.** The solution is in VS2008 `.vcproj` format (modern Visual Studio cannot even open it without conversion), and the two most important closed-source libraries (Havok, ZoidCom) are C++ static/import libraries compiled with VC9, which a modern MSVC toolchain cannot link. *(This describes the repository as found. A modern build now exists in `modern/` — see the revival progress below.)*
 - **Runnability of the original binaries: good.** The v1.0 installer (`HovercraftUniverseSetup.exe`, on the archive downloads page) produces a 32-bit DX9 game, which Windows 11 still executes. The main runtime risks are the DirectX 9 helper DLLs (installable) and the Flash ActiveX control required by the Hikari GUI (discontinued, must be sourced from an archive).
 
 ## Revival plan
 
 Goal: get the game running and buildable on modern hardware/software with the **least possible functionality change**. The strategy: first restore everything that still exists, then reproduce the original build exactly, and only then (optionally) swap out truly dead components.
 
-> **Progress:** Phase 0 is **done** (all 557 LFS assets restored and hash-verified; all 34 archive packages + the SVN source dump mirrored locally in `archive-mirror/`, pending GitHub Release upload). Phase 1's dependency/runtime layout is **done and scripted** (`scripts/bootstrap-dependencies.ps1`) — the actual VS2008 compile is deliberately deferred (no legacy toolchain on the dev machine; use a VM/sandbox if a period build is ever wanted). Phase 2's CMake conversion is **done** (see `HovercraftUniverse/CMakeLists.txt`).
+> **Progress:**
+>
+> - **Phase 0 — done.** All 557 LFS assets restored and hash-verified; all 35 archive packages + the SVN source dump mirrored and published as a GitHub Release.
+> - **Phase 1 — done and scripted** (`scripts/bootstrap-dependencies.ps1`). The original v1.0 game is **verified playable on Windows 11** — see [RUNNING.md](RUNNING.md). The period-correct VS2008 compile was deliberately skipped (no legacy toolchain on the dev machine).
+> - **Phase 2 — done.** CMake conversion of the VS2008 solution (`HovercraftUniverse/CMakeLists.txt`).
+> - **Phase 3 — the game builds from source with a 2026 toolchain and runs.** MSVC 2022 (v143) + Ogre 14.5.2 on Direct3D9. Havok replaced by a from-scratch shim over Bullet, ZoidCom by one over ENet, Hikari rebuilt from archived source. The client reaches the Flash main menu and the lobby; the dedicated server accepts connections.
+> - **Phase B (in progress) — making the modern build actually playable.** Racing is not reachable yet: level collision must be reconstructed from mesh data (the `.hkx` files are opaque) and network replication is still stubbed, which single-player also depends on. Plan and progress: [docs/porting/phase-b-plan.md](docs/porting/phase-b-plan.md).
 
 ### Phase 0 — Rescue all artifacts (do this first; nothing else works without it)
 
@@ -130,15 +136,17 @@ Compiling with modern MSVC (v143) forces every C++ dependency to be rebuilt or r
 
 - **Survive as-is** (no C++ ABI exposure): `Flash.ocx` (COM/LoadLibrary — but x86-only, so the build stays Win32), FMOD Ex (C API), Lua 5.1, TinyXML.
 - **Rebuild/port** (open source): Ogre → 1.12/1.14 (keep the D3D9 render system; materials rely on fixed-function + Cg/HLSL), OgreMax loader and SkyX ported along, OIS, Boost → current, LuaBind → maintained "deboostified" fork, Hikari from archived source.
-- **Replace** (closed-source VC9 binaries): ZoidCom → ENet behind a ZoidCom-API-compatible shim; Havok 6.6 → Jolt, including a new collision pipeline (level collision lives in proprietary `.hkx` — regenerate from the OgreMax `.scene`/`.mesh` geometry).
+- **Replace** (closed-source VC9 binaries): ZoidCom → ENet behind a ZoidCom-API-compatible shim; Havok 6.6 → **Bullet** behind a Havok-API-compatible shim, including a new collision pipeline (level collision lives in proprietary `.hkx` — regenerate from the OgreMax `.scene`/`.mesh` geometry).
+
+One triage entry turned out better than expected: **FMOD Ex needed no work at all.** Its 2010 import libraries link against v143 unchanged, because it exposes a C API under thin inline C++ wrappers — verified empirically by building and running a test exe, not assumed. Havok and ZoidCom are genuine C++ ABI and did need shims, but their original headers survive in the archive, so both were written against a real specification rather than reverse-engineered.
 
 Execution order:
 
-1. **Reference build with VC9** (Windows Sandbox + VS2008 Express from Microsoft's still-live ISO link; automation in `toolchain/sandbox/`) — the baseline for detecting behavior drift.
-2. **Modern-MSVC port of everything except physics/networking** (VS2022 Build Tools, Ogre 1.1x, rebuilt open-source deps; Havok/ZoidCom-dependent code temporarily stubbed) — proves the codebase compiles with current tools.
-3. **ZoidCom → ENet shim** — restores multiplayer on the modern build.
-4. **Havok → Jolt** *(on hold)* — the long pole: physics port + collision-from-mesh pipeline + feel tuning against the reference build.
-5. Later options: x64 (requires replacing Flash.ocx with Ruffle first), FMOD Core, D3D11/GL3+ renderers.
+1. ~~**Reference build with VC9**~~ — *skipped.* Windows Sandbox turned out to be unable to mount disk images at all, and the effort stopped being worth it. Automation kept in `toolchain/sandbox/` for anyone with a real VM. Consequence: no period baseline for detecting behaviour drift, so `local-game/` (the original binaries, playable) serves as the reference instead.
+2. **Modern-MSVC port** ✅ — VS2022 Build Tools, Ogre 14.5.2, rebuilt open-source deps. Every game source file compiles except one confirmed piece of dead code. Flushed out ~a dozen latent 2010 bugs that only compiling could find, including one real defect: `Ogre::OverlaySystem` was never registered, which modern Ogre requires for *any* overlay to render.
+3. **ZoidCom → ENet shim** — phase A ✅ (compiles, server accepts connections); phase B in progress (node linking, events, replication).
+4. **Havok → Bullet shim** — phase A ✅ (rigid bodies, shapes, phantoms, actions, ray casts); phase B pending (collision geometry reconstruction).
+5. Later options, explicitly out of scope for now: x64 (requires replacing Flash.ocx with Ruffle first), FMOD Core, D3D11/GL3+ renderers.
 
 **Deliberate remaster-side change:** the physics tick was raised from the
 original 30 Hz to 60 Hz, with per-step tuning constants re-derived against a
