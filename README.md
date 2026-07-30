@@ -74,7 +74,7 @@ The `HovercraftUniverse/dependencies/` folder is **not in the repository** — i
 | Lua + LuaBind | 5.1 / 0.9 era | MIT | ✅ Open source (archived team packages exist) |
 | Boost | ~1.40 era | BSL | ✅ Open source |
 | SkyX (sky rendering) | 0.1 | LGPL | ✅ Source archived on downloads page (`SkyX_0_1.rar`) |
-| TinyXML | vendored in `Exceptions/tinyxml` | zlib | ✅ In repo |
+| TinyXML | vendored in `OgreMax/tinyxml` | zlib | ✅ In repo |
 | DirectX 9 runtime | June 2010 redist (`d3dx9_42.dll`) | — | ✅ Still installable on Windows 11 |
 
 **Toolchain:** Visual Studio 2008 (VC9), 32-bit Windows build. The GUI sources additionally need Adobe Flash CS-era tooling to rebuild `.fla` → `.swf` (prebuilt `.swf` files are committed).
