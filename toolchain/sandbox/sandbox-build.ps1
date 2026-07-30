@@ -18,7 +18,9 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 $RepoRoot      = 'C:\repo'
 $SandboxDir    = Join-Path $RepoRoot 'toolchain\sandbox'
-$IsoPath       = Join-Path $RepoRoot 'toolchain\VS2008ExpressWithSP1ENUX1504728.iso'
+$ExtractedDir  = Join-Path $RepoRoot 'toolchain\vs2008-express'
+$ExtractedSetupExe = Join-Path $ExtractedDir 'VCExpress\setup.exe'
+$LocalVsDir    = 'C:\vs2008'
 $SlnPath       = Join-Path $RepoRoot 'HovercraftUniverse\HovercraftUniverse.sln'
 $DepsPath      = Join-Path $RepoRoot 'HovercraftUniverse\dependencies'
 $BootstrapHint = Join-Path $RepoRoot 'scripts\bootstrap-dependencies.ps1'
@@ -126,10 +128,10 @@ function Wait-ForInstallComplete {
 try {
     Write-Phase 'Preflight checks'
 
-    if (-not (Test-Path $IsoPath)) {
-        throw "VS2008 Express ISO not found at '$IsoPath'. Place VS2008ExpressWithSP1ENUX1504728.iso in toolchain\ on the host before starting the sandbox."
+    if (-not (Test-Path $ExtractedSetupExe)) {
+        throw "Extracted VS2008 Express files not found at '$ExtractedSetupExe'. On the host, extract VS2008ExpressWithSP1ENUX1504728.iso (e.g. with 7-Zip: right-click the ISO -> 7-Zip -> Extract to `"vs2008-express`") into 'toolchain\vs2008-express' so that 'toolchain\vs2008-express\VCExpress\setup.exe' exists, then restart the sandbox."
     }
-    Write-Host "Found ISO: $IsoPath"
+    Write-Host "Found extracted VS2008 Express files: $ExtractedSetupExe"
 
     if (-not (Test-Path $SlnPath)) {
         throw "Solution file not found at '$SlnPath'."
@@ -159,112 +161,59 @@ try {
             Write-Host "DISM completed with exit code $($dism.ExitCode)."
         }
 
-        Write-Phase 'Copy ISO to sandbox-local disk'
-        # Mounting directly from the mapped share (C:\repo is VMSMB-backed) is
-        # unreliable inside Windows Sandbox. Copy it to a local path first.
-        $LocalIsoPath = 'C:\vs2008.iso'
-        Write-Host "Copying ISO to local disk: $IsoPath -> $LocalIsoPath (~750 MB, this can take a minute)..."
-        Copy-Item -Path $IsoPath -Destination $LocalIsoPath -Force
-        Write-Host "Copy complete: $((Get-Item $LocalIsoPath).Length) bytes"
-
-        Write-Phase 'Mount VS2008 Express ISO'
-        Mount-DiskImage -ImagePath $LocalIsoPath -PassThru | Out-Null
-
-        $isoRoot = $null
-        $mountDeadline = (Get-Date).AddSeconds(15)
-
-        while (-not $isoRoot -and (Get-Date) -lt $mountDeadline) {
-            $vol = Get-DiskImage -ImagePath $LocalIsoPath -ErrorAction SilentlyContinue | Get-Volume -ErrorAction SilentlyContinue
-            if ($vol -and $vol.DriveLetter) {
-                $isoRoot = "$($vol.DriveLetter):\"
-            }
-            else {
-                Start-Sleep -Seconds 2
-            }
+        Write-Phase 'Copy extracted VS2008 Express files to sandbox-local disk'
+        # Windows Sandbox does not support ISO mounting at all (Mount-DiskImage
+        # "succeeds" but no volume ever appears), and running the installer
+        # straight off the VMSMB-backed C:\repo mapped share is unreliable.
+        # The ISO has already been extracted to plain files on the host
+        # (toolchain\vs2008-express, via 7-Zip); robocopy that tree to a local
+        # path first.
+        Write-Host "Copying extracted VS2008 Express files to local disk: $ExtractedDir -> $LocalVsDir (~2.2 GB, this can take a few minutes)..."
+        $robocopyOutput = robocopy $ExtractedDir $LocalVsDir /E /NFL /NDL
+        $robocopyExitCode = $LASTEXITCODE
+        Write-Host ($robocopyOutput | Out-String)
+        # Robocopy exit codes 0-7 all indicate success (bit flags for
+        # copied/skipped/mismatched files); only 8+ indicates a real failure.
+        if ($robocopyExitCode -ge 8) {
+            throw "robocopy failed copying '$ExtractedDir' to '$LocalVsDir' (exit code $robocopyExitCode)."
         }
+        Write-Host "robocopy completed with exit code $robocopyExitCode (0-7 = success)."
 
-        if (-not $isoRoot) {
-            Write-Host 'Drive letter not resolved via Get-DiskImage/Get-Volume; scanning all volumes for VCExpress\setup.exe...'
-            $candidate = Get-Volume -ErrorAction SilentlyContinue |
-                Where-Object { $_.DriveLetter } |
-                Where-Object { Test-Path "$($_.DriveLetter):\VCExpress\setup.exe" } |
-                Select-Object -First 1
-
-            if ($candidate) {
-                $isoRoot = "$($candidate.DriveLetter):\"
-            }
+        $setupExe = Join-Path $LocalVsDir 'VCExpress\setup.exe'
+        if (-not (Test-Path $setupExe)) {
+            throw "Could not find setup.exe at '$setupExe' after copying to local disk."
         }
+        Write-Host "Using installer: $setupExe"
 
-        if (-not $isoRoot) {
-            throw "Failed to determine drive letter for mounted ISO '$LocalIsoPath' (tried Get-DiskImage/Get-Volume retry loop and a full volume scan for VCExpress\setup.exe)."
-        }
+        Write-Phase 'Install Visual C++ 2008 Express (silent)'
 
-        Write-Host "ISO mounted at $isoRoot"
+        $installed = $false
+        $attempts = @('/q /norestart', '/qb /norestart')
 
-        try {
-            $setupExe = Join-Path $isoRoot 'VCExpress\setup.exe'
-            if (-not (Test-Path $setupExe)) {
-                # Some ISO layouts put setup.exe at the root instead.
-                $altSetup = Join-Path $isoRoot 'setup.exe'
-                if (Test-Path $altSetup) {
-                    $setupExe = $altSetup
-                }
-                else {
-                    throw "Could not find setup.exe under '$isoRoot' (expected VCExpress\setup.exe)."
-                }
-            }
-            Write-Host "Using installer: $setupExe"
-
-            Write-Phase 'Install Visual C++ 2008 Express (silent)'
-
-            $installed = $false
-            $attempts = @('/q /norestart', '/qb /norestart')
-
-            foreach ($argString in $attempts) {
-                Write-Host "Launching: `"$setupExe`" $argString"
-                try {
-                    $proc = Start-Process -FilePath $setupExe -ArgumentList $argString -PassThru -Wait -ErrorAction Stop
-                    Write-Host "setup.exe exited with code $($proc.ExitCode) (args: $argString)"
-                }
-                catch {
-                    Write-Host "setup.exe invocation failed (args: $argString): $($_.Exception.Message)"
-                }
-
-                Write-Host 'Polling for install-complete marker (installer spawns child processes that may still be running)...'
-                if (Wait-ForInstallComplete -MarkerPath $ClExe -TimeoutMinutes $InstallTimeoutMinutes) {
-                    $installed = $true
-                    break
-                }
-
-                Write-Host "Marker not found after attempt with args '$argString'; trying fallback invocation if available."
-            }
-
-            if (-not $installed) {
-                throw "Visual C++ 2008 Express install did not complete within $InstallTimeoutMinutes minutes (marker '$ClExe' never appeared)."
-            }
-
-            Write-Host 'Visual C++ 2008 Express installation confirmed.'
-        }
-        finally {
-            Write-Phase 'Dismount VS2008 Express ISO'
+        foreach ($argString in $attempts) {
+            Write-Host "Launching: `"$setupExe`" $argString"
             try {
-                Dismount-DiskImage -ImagePath $LocalIsoPath -ErrorAction Stop | Out-Null
-                Write-Host 'ISO dismounted.'
+                $proc = Start-Process -FilePath $setupExe -ArgumentList $argString -PassThru -Wait -ErrorAction Stop
+                Write-Host "setup.exe exited with code $($proc.ExitCode) (args: $argString)"
             }
             catch {
-                Write-Host "Warning: failed to dismount ISO cleanly: $($_.Exception.Message)"
+                Write-Host "setup.exe invocation failed (args: $argString): $($_.Exception.Message)"
             }
 
-            if (Test-Path $LocalIsoPath) {
-                try {
-                    Remove-Item -Path $LocalIsoPath -Force -ErrorAction Stop
-                    Write-Host "Removed local ISO copy: $LocalIsoPath"
-                }
-                catch {
-                    Write-Host "Warning: failed to remove local ISO copy '$LocalIsoPath': $($_.Exception.Message)"
-                }
+            Write-Host 'Polling for install-complete marker (installer spawns child processes that may still be running)...'
+            if (Wait-ForInstallComplete -MarkerPath $ClExe -TimeoutMinutes $InstallTimeoutMinutes) {
+                $installed = $true
+                break
             }
+
+            Write-Host "Marker not found after attempt with args '$argString'; trying fallback invocation if available."
         }
+
+        if (-not $installed) {
+            throw "Visual C++ 2008 Express install did not complete within $InstallTimeoutMinutes minutes (marker '$ClExe' never appeared)."
+        }
+
+        Write-Host 'Visual C++ 2008 Express installation confirmed.'
     }
 
     if (-not (Test-Path $ClExe)) {

@@ -10,10 +10,12 @@ Sandbox instance. Nothing is installed on the host.
    Windows Features -> check "Windows Sandbox" -> reboot when prompted.
    (Requires Windows 11 Pro/Enterprise/Education with virtualization enabled
    in the BIOS.)
-2. Make sure the installer ISO is present at:
-   `toolchain\VS2008ExpressWithSP1ENUX1504728.iso`
-   (relative to the repo root — it's already there if you're reading this
-   from a checkout that includes it).
+2. Extract the installer ISO to plain files — Windows Sandbox cannot mount
+   ISO images, so the contents have to already be on disk as regular files.
+   Right-click `toolchain\VS2008ExpressWithSP1ENUX1504728.iso` -> 7-Zip ->
+   "Extract to `vs2008-express\`" (or equivalent), so that
+   `toolchain\vs2008-express\VCExpress\setup.exe` exists. The extracted tree
+   is about 2.2 GB.
 
 ## Running the build
 
@@ -21,7 +23,8 @@ Sandbox instance. Nothing is installed on the host.
 2. Windows Sandbox launches, maps this repo read-write at `C:\repo`, and
    automatically runs `sandbox-build.ps1` in a PowerShell window that stays
    open (`-NoExit`) so you can watch progress and see any errors.
-3. The script will, in order: enable .NET Framework 3.5, mount the ISO,
+3. The script will, in order: enable .NET Framework 3.5, robocopy the
+   extracted VS2008 Express files to a local path inside the sandbox,
    silently install VC++ 2008 Express, wait for the install to finish, then
    build `HovercraftUniverse.sln` for `Release|Win32` (and `Debug|Win32` as a
    best-effort extra).
@@ -55,8 +58,10 @@ bin/lib build output) survives on the host.
 
 ## If it fails
 
-- "ISO not found" — put `VS2008ExpressWithSP1ENUX1504728.iso` at
-  `toolchain\VS2008ExpressWithSP1ENUX1504728.iso` and try again.
+- "Extracted VS2008 Express files not found" — extract
+  `toolchain\VS2008ExpressWithSP1ENUX1504728.iso` with 7-Zip into
+  `toolchain\vs2008-express` so that
+  `toolchain\vs2008-express\VCExpress\setup.exe` exists, then try again.
 - "Dependencies folder not found" — run `scripts\bootstrap-dependencies.ps1`
   on the host first, then relaunch the sandbox.
 - Anything else — check the `build-<timestamp>.log` file named in the
