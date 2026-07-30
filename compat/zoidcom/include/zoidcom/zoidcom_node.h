@@ -34,9 +34,25 @@
 * documented timing (Advanced replicators' sendData()/sendDataDirect() are
 * delivered immediately rather than deferred to onPreSendData()).
 *
+* Real (Phase B, connect-handshake-follow-up pass -- see
+* docs/porting/phase-b-replication.md): dependsOn() now actually orders
+* deferred announcements -- ZCom_shimGetDependencies() exposes the recorded
+* edges so Control.cpp's flush can topologically sort same-cycle pending
+* nodes (see ZCom_shimFlushPendingAnnouncements()/Control.cpp's
+* topoOrderPendingFlush()). The replication interceptor
+* (setReplicationInterceptor()) is now driven for real: outPreUpdate/
+* outPreUpdateItem/outPostUpdate from ZCom_shimTickReplication(),
+* outPreReplicateNode from ZCom_shimFlushPendingAnnouncements(),
+* outPreDereplicateNode from disconnectAll()/ZCom_shimNoteConnectionClosed(),
+* and inPreUpdate/inPreUpdateItem/inPostUpdate from the (now _from_conn/
+* _remote_role-aware) ZCom_shimApplyReplBatch().
+*
 * Still TODO(phaseB) stubs: addInterpolationInt/Float (unused by any current
 * call site), Zoidlevel membership (applyForZoidLevel/registerNodeByTag),
-* mustsync/Zoidlevel authority migration, file transfer.
+* mustsync/Zoidlevel authority migration, file transfer. ZCOM_REPFLAG_INTERCEPT
+* on a *primitive* replication item also stays a todoPhaseBOnce (no current
+* game code sets it there; only ZCom_Replicator-backed items can supply the
+* ZCom_Replicator* the interceptor's *UpdateItem() callbacks require).
 *
 * This header also declares a handful of `ZCom_shim*` methods that are NOT
 * part of the real ZoidCom API -- they exist purely so
@@ -55,6 +71,7 @@
 #define _ZOIDNODE_H_
 
 #include "zoidcom.h"
+#include <vector>
 
 class ZCom_Node_Private;
 class ZCom_Control;
@@ -245,8 +262,20 @@ public:
 
   /// Applies an incoming primitive/ZCom_ReplicatorBasic batch (a
   /// kMsgNodeReplBatch payload, already unwrapped down to the item list) to
-  /// this node's registered fields/replicators.
-  void ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, zU32 _estimated_time_sent);
+  /// this node's registered fields/replicators. _from_conn/_remote_role
+  /// identify the sender, so the replication interceptor's inPreUpdate()/
+  /// inPreUpdateItem()/inPostUpdate() (if one is registered) can be driven
+  /// with correct arguments -- see zoidcom_node_interceptors.h and
+  /// Node.cpp's file header.
+  void ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, ZCom_ConnID _from_conn,
+    eZCom_NodeRole _remote_role, zU32 _estimated_time_sent);
+
+  /// This node's dependsOn() edges (see dependsOn() above), exposed so
+  /// Control.cpp's deferred-announcement flush can topologically order
+  /// nodes pending announcement in the same ZCom_processOutput() cycle --
+  /// see ZCom_shimFlushPendingAnnouncements() and Control.cpp's
+  /// topoOrderPendingFlush().
+  std::vector<ZCom_Node*> ZCom_shimGetDependencies() const;
 
   /// Backs ZCom_ReplicatorAdvanced::sendData()/sendDataDirect() (see
   /// Replicator.cpp): finds _rep's item index on this node and sends

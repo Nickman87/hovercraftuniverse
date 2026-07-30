@@ -363,6 +363,9 @@ void ZCom_Node::disconnectAll() {
         for (std::map<ZCom_ConnID, LinkedConn>::iterator it = m_priv->linked_conns.begin();
              it != m_priv->linked_conns.end(); ++it) {
             if (it->second.announced) {
+                if (m_priv->replication_interceptor) {
+                    m_priv->replication_interceptor->outPreDereplicateNode(this, it->first, it->second.role);
+                }
                 m_priv->control->ZCom_shimSendNodeRemove(it->first, m_priv->network_id);
             }
         }
@@ -401,15 +404,21 @@ zS32 ZCom_Node::getRelevantConnections(ZCom_ConnID* _conns, zU32 _max, zU32* _co
 }
 
 void ZCom_Node::dependsOn(ZCom_Node* _othernode, eZCom_DependencyOpt _opt) {
-    // Recorded but not acted on -- see file header. No current call site
-    // exists in the game (confirmed by grep), and our tick has no
-    // priority/partial-scheduling model for a dependency edge to reorder.
+    // Recorded, and (see ZCom_shimGetDependencies() / Control.cpp's
+    // topoOrderPendingFlush()) now actually acted on: the deferred
+    // announcement flush topologically orders same-cycle pending nodes so
+    // _othernode is announced to a given connection before this node is --
+    // see the file header and docs/porting/phase-b-replication.md.
     if (!_othernode) return;
     if (_opt == eZCom_AddDependency) {
         m_priv->dependencies.insert(_othernode);
     } else {
         m_priv->dependencies.erase(_othernode);
     }
+}
+
+std::vector<ZCom_Node*> ZCom_Node::ZCom_shimGetDependencies() const {
+    return std::vector<ZCom_Node*>(m_priv->dependencies.begin(), m_priv->dependencies.end());
 }
 
 void ZCom_Node::applyForZoidLevel(zU8 _level) {
@@ -737,6 +746,10 @@ void ZCom_Node::ZCom_shimFlushPendingAnnouncements() {
         if (it == m_priv->linked_conns.end()) continue; // connection dropped before we flushed
         LinkedConn& entry = it->second;
 
+        if (m_priv->replication_interceptor) {
+            m_priv->replication_interceptor->outPreReplicateNode(this, conn, entry.role);
+        }
+
         if (m_priv->is_unique_kind) {
             m_priv->control->ZCom_shimSendNodeLinkUnique(conn, m_priv->class_id, m_priv->network_id);
             if (entry.role == eZCom_RoleOwner) {
@@ -785,6 +798,10 @@ void ZCom_Node::ZCom_shimNoteConnectionClosed(ZCom_ConnID _conn) {
         std::map<ZCom_ConnID, LinkedConn>::iterator it = m_priv->linked_conns.find(_conn);
         if (it != m_priv->linked_conns.end()) {
             eZCom_NodeRole was = it->second.role;
+            bool was_announced = it->second.announced;
+            if (was_announced && m_priv->replication_interceptor) {
+                m_priv->replication_interceptor->outPreDereplicateNode(this, _conn, was);
+            }
             m_priv->linked_conns.erase(it);
             forEachAdvancedReplicator(m_priv, [_conn, was](ZCom_ReplicatorAdvanced* rep) {
                 rep->onConnectionRemoved(_conn, was);
@@ -819,6 +836,12 @@ struct PendingReplItem {
     zU16 index;
     zU8 rules;
     bool unreliable; // ZCOM_REPFLAG_MOSTRECENT -- see file header
+    bool intercept;  // ZCOM_REPFLAG_INTERCEPT -- gates outPreUpdateItem() below
+    ZCom_Replicator* replicator; // non-NULL only for a CustomReplicator item;
+                                 // outPreUpdateItem() needs this to hand to
+                                 // the interceptor. Primitive items have no
+                                 // such object -- see the file header's
+                                 // ZCOM_REPFLAG_INTERCEPT-on-primitive note.
     ZCom_BitStream* payload;
 };
 
@@ -962,6 +985,8 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
             p.index = (zU16) i;
             p.rules = item.rules;
             p.unreliable = mostrecent;
+            p.intercept = (item.flags & ZCOM_REPFLAG_INTERCEPT) != 0;
+            p.replicator = (item.kind == ReplicationItem::CustomReplicator) ? item.replicator : NULL;
             p.payload = payload;
             pending.push_back(p);
         } else if (payload) {
@@ -988,8 +1013,19 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
 
         for (size_t t = 0; t < targets.size(); t++) {
             ZCom_ConnID conn = targets[t];
+            eZCom_NodeRole remote_role = (m_priv->role == eZCom_RoleAuthority) ? target_role[conn] : eZCom_RoleAuthority;
+
+            // outPreUpdate(): "Should return 'false' to prevent sending
+            // updates now, 'true' otherwise" -- a per-tick, per-connection
+            // veto, not a permanent one (zoidcom_node_interceptors.h).
+            if (m_priv->replication_interceptor &&
+                !m_priv->replication_interceptor->outPreUpdate(this, conn, remote_role)) {
+                continue;
+            }
+
             ZCom_BitStream reliable_env, unreliable_env;
             zU16 reliable_count = 0, unreliable_count = 0;
+            zU32 rep_bits = 0;
 
             for (size_t p = 0; p < pending.size(); p++) {
                 bool applies;
@@ -1003,6 +1039,26 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
                 }
                 if (!applies) continue;
 
+                // outPreUpdateItem(): "This callback only gets called if the
+                // replication item really is about to be updated now" --
+                // matches `pending` already being exactly the dirty set for
+                // this tick. Gated by ZCOM_REPFLAG_INTERCEPT per the flag's
+                // own doc. No current game code sets that flag, so the
+                // primitive-item (no ZCom_Replicator to pass) branch below
+                // is unreachable today but handled per the file header.
+                if (pending[p].intercept && m_priv->replication_interceptor) {
+                    if (pending[p].replicator) {
+                        if (!m_priv->replication_interceptor->outPreUpdateItem(this, conn, remote_role, pending[p].replicator)) {
+                            continue;
+                        }
+                    } else {
+                        zshim::todoPhaseBOnce("ZCom_Node::ZCom_shimTickReplication(intercept-primitive)",
+                            "ZCOM_REPFLAG_INTERCEPT set on a primitive replication item; outPreUpdateItem() "
+                            "can't be called without a ZCom_Replicator instance to pass, sending the update "
+                            "unfiltered (unused by any current game code)");
+                    }
+                }
+
                 ZCom_BitStream& env = pending[p].unreliable ? unreliable_env : reliable_env;
                 zU16& count = pending[p].unreliable ? unreliable_count : reliable_count;
                 env.addInt(pending[p].index, 16);
@@ -1010,6 +1066,7 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
                 env.addInt(bits, 16);
                 env.addBitStream(pending[p].payload, true);
                 count++;
+                rep_bits += 32 + bits; // index + length fields, plus the payload itself
             }
 
             if (reliable_count > 0) {
@@ -1024,47 +1081,96 @@ void ZCom_Node::ZCom_shimTickReplication(zU32 _simulation_time_passed) {
                 out.addBitStream(&unreliable_env, true);
                 m_priv->control->ZCom_shimSendNodeReplBatch(conn, m_priv->network_id, false, out);
             }
+
+            // outPostUpdate(): only fires when something was actually
+            // included in this connection's update this tick -- matches
+            // "The node has included it's update into the current packet."
+            if ((reliable_count > 0 || unreliable_count > 0) && m_priv->replication_interceptor) {
+                m_priv->replication_interceptor->outPostUpdate(this, conn, remote_role, rep_bits, 0, 0);
+            }
         }
     }
 
     for (size_t p = 0; p < pending.size(); p++) delete pending[p].payload;
 }
 
-void ZCom_Node::ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, zU32 _estimated_time_sent) {
+void ZCom_Node::ZCom_shimApplyReplBatch(ZCom_BitStream& _envelope, ZCom_ConnID _from_conn,
+                                         eZCom_NodeRole _remote_role, zU32 _estimated_time_sent) {
     zU16 count = (zU16) _envelope.getInt(16);
+
+    // inPreUpdate(): "Should return 'false' to prevent applying the
+    // replication data updates. Events will be received nevertheless."
+    // (zoidcom_node_interceptors.h). We still fully parse the envelope below
+    // regardless -- this shim's NODE_REPL_BATCH message is self-contained
+    // (its own length-prefixed item list), so skipping application never
+    // risks desyncing a read cursor the way it might in a combined packet.
+    bool allow_apply = true;
+    if (m_priv->replication_interceptor) {
+        allow_apply = m_priv->replication_interceptor->inPreUpdate(this, _from_conn, _remote_role);
+    }
+
+    zU32 rep_bits = 16; // the count field itself
     for (zU16 i = 0; i < count; i++) {
         zU16 index = (zU16) _envelope.getInt(16);
         zU32 bits = _envelope.getInt(16);
         ZCom_BitStream* sub = _envelope.getBitStream(bits, true);
+        rep_bits += 32 + bits; // index + length fields, plus the payload itself
 
         if (index < m_priv->replication_items.size()) {
             ReplicationItem& item = m_priv->replication_items[index];
-            switch (item.kind) {
-            case ReplicationItem::Int:
-                if (item.sign) *(zS32*) item.ptr = sub->getSignedInt(item.bits);
-                else *(zS32*) item.ptr = (zS32) sub->getInt(item.bits);
-                break;
-            case ReplicationItem::Bool:
-                *(bool*) item.ptr = sub->getBool();
-                break;
-            case ReplicationItem::Float:
-                *(zFloat*) item.ptr = sub->getFloat(item.bits);
-                break;
-            case ReplicationItem::String:
-                sub->getString((char*) item.ptr, item.maxlen);
-                break;
-            case ReplicationItem::StringW:
-                sub->getStringW((wchar_t*) item.ptr, item.maxlen);
-                break;
-            case ReplicationItem::CustomReplicator:
-                if (item.replicator && (item.replicator->getFlags() & ZCOM_REPLICATOR_BASIC)) {
-                    static_cast<ZCom_ReplicatorBasic*>(item.replicator)->unpackData(sub, true, _estimated_time_sent);
+
+            // inPreUpdateItem(): gated by ZCOM_REPFLAG_INTERCEPT, same
+            // reasoning as outPreUpdateItem() in ZCom_shimTickReplication()
+            // -- no current game code sets the flag, so the primitive-item
+            // branch is unreachable today.
+            bool allow_item = allow_apply;
+            if (allow_item && (item.flags & ZCOM_REPFLAG_INTERCEPT) && m_priv->replication_interceptor) {
+                if (item.kind == ReplicationItem::CustomReplicator && item.replicator) {
+                    allow_item = m_priv->replication_interceptor->inPreUpdateItem(
+                        this, _from_conn, _remote_role, item.replicator, _estimated_time_sent);
+                } else {
+                    zshim::todoPhaseBOnce("ZCom_Node::ZCom_shimApplyReplBatch(intercept-primitive)",
+                        "ZCOM_REPFLAG_INTERCEPT set on a primitive replication item; inPreUpdateItem() "
+                        "can't be called without a ZCom_Replicator instance to pass, applying the update "
+                        "unfiltered (unused by any current game code)");
                 }
-                break;
-            default: break;
+            }
+
+            if (allow_item) {
+                switch (item.kind) {
+                case ReplicationItem::Int:
+                    if (item.sign) *(zS32*) item.ptr = sub->getSignedInt(item.bits);
+                    else *(zS32*) item.ptr = (zS32) sub->getInt(item.bits);
+                    break;
+                case ReplicationItem::Bool:
+                    *(bool*) item.ptr = sub->getBool();
+                    break;
+                case ReplicationItem::Float:
+                    *(zFloat*) item.ptr = sub->getFloat(item.bits);
+                    break;
+                case ReplicationItem::String:
+                    sub->getString((char*) item.ptr, item.maxlen);
+                    break;
+                case ReplicationItem::StringW:
+                    sub->getStringW((wchar_t*) item.ptr, item.maxlen);
+                    break;
+                case ReplicationItem::CustomReplicator:
+                    if (item.replicator && (item.replicator->getFlags() & ZCOM_REPLICATOR_BASIC)) {
+                        static_cast<ZCom_ReplicatorBasic*>(item.replicator)->unpackData(sub, true, _estimated_time_sent);
+                    }
+                    break;
+                default: break;
+                }
             }
         }
         delete sub;
+    }
+
+    // inPostUpdate(): "Incoming data has updated the node" -- only fires
+    // when an update was actually (attempted to be) applied, i.e. when
+    // inPreUpdate() didn't veto the whole batch.
+    if (allow_apply && m_priv->replication_interceptor) {
+        m_priv->replication_interceptor->inPostUpdate(this, _from_conn, _remote_role, rep_bits, 0, 0);
     }
 }
 

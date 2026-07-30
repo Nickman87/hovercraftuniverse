@@ -90,6 +90,18 @@
 // Both are dispatched in ZCom_processInput() alongside NODE_EVENT, subject
 // to the same handshake-pending backstop.
 //
+// Real (Phase B, connect-handshake-follow-up pass -- see
+// docs/porting/phase-b-replication.md): ZCom_processOutput()'s deferred-
+// announcement flush now topologically orders same-cycle pending nodes per
+// ZCom_Node::dependsOn() (see topoOrderPendingFlush() below and
+// Node.cpp's ZCom_shimGetDependencies()) -- this is what stops a dependent
+// node (e.g. RacePlayer) from being announced to a connection before a
+// node it dependsOn() (RaceState/PlayerSettings) when both are queued in
+// the same cycle. NODE_REPL_BATCH dispatch now also passes the sending
+// connection/role through to ZCom_shimApplyReplBatch() so the receiving
+// node's replication interceptor (if any) can be driven -- see Node.cpp's
+// file header.
+//
 // TODO(phaseB) stubs: Zoidlevels/ZCom_requestZoidMode, LAN discovery
 // (ZCom_Discover/ZCom_setDiscoverListener), lag/loss simulation.
 #include "zoidcom_shim_internal.h"
@@ -877,7 +889,12 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                         ZCom_BitStream* payload = bits ? envelope.getBitStream(bits, true) : NULL;
 
                         ZCom_Node* node = ZCom_shimFindNetId(netid);
-                        if (node && payload) node->ZCom_shimApplyReplBatch(*payload, sent_time);
+                        if (node && payload) {
+                            eZCom_NodeRole remote_role = (node->getRole() == eZCom_RoleAuthority)
+                                ? node->ZCom_shimRemoteRoleFor(from_conn)
+                                : eZCom_RoleAuthority;
+                            node->ZCom_shimApplyReplBatch(*payload, from_conn, remote_role, sent_time);
+                        }
                         delete payload;
                     } else if (kind == kMsgNodeReplAdv) {
                         ZCom_BitStream envelope;
@@ -972,14 +989,77 @@ void ZCom_Control::ZCom_processReplicators(zU32 _simulation_time_passed) {
     }
 }
 
+namespace {
+
+// dependsOn() ordering (see phase-b-replication.md's "Bug 1" and
+// Node.cpp's ZCom_shimGetDependencies()): topologically sort the nodes
+// pending an announcement flush in *this* ZCom_processOutput() cycle so
+// that any dependency edge between two of them is honoured -- the
+// dependency gets flushed (and thus announced to every connection it's
+// pending on) before the dependent node does.
+//
+// Only edges where BOTH ends are in `pending` this cycle are considered.
+// A dependency pointing outside `pending` is treated as already
+// satisfied without ever being dereferenced: either it was announced in
+// an earlier cycle (the common case -- e.g. RacePlayer depends on the
+// long-since-announced Lobby/PlayerSettings), or the pointer is stale
+// because the dependency node was since deleted. We cannot safely tell
+// these two apart from here (doing so would mean calling a method on a
+// possibly-freed ZCom_Node*), so per the brief's "do not deadlock or drop
+// the dependent forever" we simply impose no ordering constraint and let
+// the dependent flush normally -- proceeding, not logging, since the
+// overwhelmingly common case (already-announced) would otherwise get
+// misreported as an anomaly on every single flush.
+//
+// Cycles are broken (logged once) rather than hung, via the `visiting`
+// set below.
+void visitPendingFlushNode(ZCom_Node* n, const std::set<ZCom_Node*>& pending_set,
+                            std::set<ZCom_Node*>& done, std::set<ZCom_Node*>& visiting,
+                            std::vector<ZCom_Node*>& order) {
+    if (done.count(n)) return;
+    if (visiting.count(n)) {
+        zshim::todoPhaseBOnce("ZCom_Control::ZCom_processOutput(dependsOn-cycle)",
+            "dependsOn() cycle detected among nodes pending announcement in the same "
+            "ZCom_processOutput() cycle; breaking the cycle and proceeding rather than hanging");
+        return;
+    }
+    visiting.insert(n);
+    std::vector<ZCom_Node*> deps = n->ZCom_shimGetDependencies();
+    for (size_t i = 0; i < deps.size(); i++) {
+        if (pending_set.count(deps[i])) {
+            visitPendingFlushNode(deps[i], pending_set, done, visiting, order);
+        }
+    }
+    visiting.erase(n);
+    done.insert(n);
+    order.push_back(n);
+}
+
+std::vector<ZCom_Node*> topoOrderPendingFlush(const std::vector<ZCom_Node*>& nodes) {
+    std::set<ZCom_Node*> pending_set(nodes.begin(), nodes.end());
+    std::set<ZCom_Node*> done;
+    std::set<ZCom_Node*> visiting;
+    std::vector<ZCom_Node*> order;
+    order.reserve(nodes.size());
+    for (size_t i = 0; i < nodes.size(); i++) {
+        visitPendingFlushNode(nodes[i], pending_set, done, visiting, order);
+    }
+    return order;
+}
+
+} // namespace
+
 void ZCom_Control::ZCom_processOutput() {
     // Phase B: flush any deferred node announcements (NODE_CREATE /
     // NODE_LINK_UNIQUE), now that any setOwner() calls made since they were
     // queued have had a chance to land -- see
     // ZCom_Node::ZCom_shimFlushPendingAnnouncements() and this file's header.
+    // Order respects dependsOn() edges recorded within this same cycle --
+    // see topoOrderPendingFlush() above.
     if (!m_priv->pending_flush_nodes.empty()) {
         std::vector<ZCom_Node*> nodes(m_priv->pending_flush_nodes.begin(), m_priv->pending_flush_nodes.end());
         m_priv->pending_flush_nodes.clear();
+        nodes = topoOrderPendingFlush(nodes);
         for (size_t i = 0; i < nodes.size(); i++) {
             nodes[i]->ZCom_shimFlushPendingAnnouncements();
         }
