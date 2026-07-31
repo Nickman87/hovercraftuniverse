@@ -1310,7 +1310,21 @@ public:
         // speed + preserve/append gravity along "down", clamped by gain and
         // max acceleration. See class-level doc comment above.
         hkVector4 desired;
-        desired.setMul4(in.m_inputUD * m_speed, in.m_forward);
+        // Sign convention: drive along -m_forward, not +m_forward.
+        //
+        // The game hands us m_forward = newOrientation.getColumn(2), i.e. the
+        // +Z column of the orientation it is about to render with
+        // (HavokHovercraft::update). But the game's own notion of "forward" is
+        // -Z: Entity::getOrientation() returns mOrientation * NEGATIVE_UNIT_Z,
+        // and Entity's constructor builds orientation via
+        // NEGATIVE_UNIT_Z.getRotationTo(...). So +m_forward points out of the
+        // BACK of the craft as drawn.
+        //
+        // Real Havok's character state machine evidently accounted for this;
+        // this shim's simplified handle() did not, which made arrow-up drive
+        // the hovercraft backwards while steering behaved correctly -- reported
+        // by a human tester, since nothing headless can press a key.
+        desired.setMul4(-in.m_inputUD * m_speed, in.m_forward);
         hkVector4 delta = desired - in.m_velocity;
         hkReal dt = in.m_stepInfo.m_deltaTime;
         hkReal maxDelta = m_maxLinearAcceleration * dt;
