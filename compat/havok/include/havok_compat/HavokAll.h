@@ -34,6 +34,8 @@
 
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
+#include <BulletCollision/BroadphaseCollision/btBroadphaseInterface.h>
+#include <BulletCollision/BroadphaseCollision/btBroadphaseProxy.h>
 #include <BulletCollision/NarrowPhaseCollision/btGjkPairDetector.h>
 #include <BulletCollision/NarrowPhaseCollision/btPointCollector.h>
 #include <BulletCollision/CollisionShapes/btConvexShape.h>
@@ -45,6 +47,7 @@
 #include <BulletCollision/CollisionShapes/btTriangleMesh.h>
 
 #include "havok_compat/CollisionProvider.h"
+#include "havok_compat/PhysicsDiag.h"
 
 namespace havok_compat {
     // Logs `msg` (prefixed "TODO(phaseB): ") to stderr exactly once per
@@ -896,6 +899,16 @@ public:
     }
 };
 
+// hkpAabbPhantom is a BROADPHASE-ONLY query in real Havok: it reports which
+// objects' AABBs overlap its own AABB and does no narrowphase collision work
+// at all. Unlike hkpShapePhantom/hkpSimpleShapePhantom (real trigger volumes
+// with a real shape), this phantom never gets a btPairCachingGhostObject and
+// is never added to the Bullet world -- see hkpWorld::addPhantom() and
+// hkpWorld::_updatePhantomOverlaps(), which queries m_aabb directly against
+// m_broadphasePair (a cheap AABB-tree test) instead. That is what keeps an
+// hkpAabbPhantom (e.g. PlanetGravityPhantom, whose AABB can span most of a
+// level) from forcing full narrowphase (e.g. box-vs-triangle-mesh) between
+// itself and everything inside it on every physics step.
 class hkpAabbPhantom : public hkpPhantom {
 public:
     hkAabb m_aabb;
@@ -1236,12 +1249,13 @@ inline hkpRigidBody::~hkpRigidBody() {
 }
 
 inline void hkpAabbPhantom::setAabb(const hkAabb& aabb) {
+    // No ghost object exists for an hkpAabbPhantom (see hkpWorld::addPhantom
+    // and the class comment above) -- it is a broadphase-only query, so
+    // there is nothing to move/resize in the Bullet world here. Storing the
+    // new AABB is sufficient: hkpWorld::_updatePhantomOverlaps() reads
+    // m_aabb fresh via getAabb() on its next call, so a runtime setAabb() is
+    // picked up on the very next step.
     m_aabb = aabb;
-    if (m_ghost) {
-        hkVector4 center; center.setAdd4(aabb.m_min, aabb.m_max); center.mul4(0.5f);
-        btTransform t; t.setIdentity(); t.setOrigin(center.v);
-        m_ghost->setWorldTransform(t);
-    }
 }
 
 inline void hkpShapePhantom::setTransform(const hkTransform& t) {
@@ -1274,6 +1288,14 @@ struct hkpSurfaceInfo {
     bool m_supported = false;
     hkVector4 m_surfaceNormal;
     hkVector4 m_surfaceVelocity;
+    // Shim-only field -- NO equivalent in real Havok's hkpSurfaceInfo. Set by
+    // hkpCharacterRigidBody::checkSupport() (HavokAll.cpp) when the
+    // character's rigid body currently has a PlanetGravityAction attached
+    // (see kPlanetGravityActionUserData below). Consumed by
+    // hkpCharacterStateInAir::handle() to suppress m_characterGravity while
+    // the game's own planet gravity is already acting -- see "planet gravity
+    // supersedes character gravity" in docs/porting/physics-model.md section 4.
+    bool m_planetGravityActive = false;
 };
 
 struct hkpCharacterInput {
@@ -1293,22 +1315,44 @@ struct hkpCharacterOutput {
     hkVector4 m_velocity;
 };
 
+// Shim-level safety net -- NO equivalent in real Havok. Real Havok's
+// spring-based character states are naturally bounded (they never fight a
+// 1/dist singularity the way this shim's simplified physics can -- see the
+// class-level doc comment above and docs/porting/physics-model.md). This
+// constant exists purely so a runaway interaction between this shim's
+// gravity handling and the game's own hover spring can never again fling a
+// character to |v| in the hundreds before the next physics step has a
+// chance to correct course. hkpCharacterRigidBodyCinfo::m_maxLinearVelocity
+// would be the "real" bound to use, but it is not reachable from handle()
+// (handle() only sees hkpCharacterInput/hkpCharacterOutput, and Cinfo is
+// consumed once at construction and not retained) -- see docs/porting/
+// physics-model.md for why a named constant is used instead. Chosen well
+// above the game's own top speeds (tens of units/sec).
+static constexpr hkReal kCharacterVelocitySafetyClamp = 200.0f;
+
 class hkpCharacterState : public hkReferencedObject {
 public:
     hkReal m_speed = 5.0f;
     hkReal m_gain = 1.0f;
     hkReal m_maxLinearAcceleration = 50.0f;
     bool m_disableHorizontalProjection = false;
+    // Per-state-instance call counter backing the throttled diagLog() calls
+    // below (states are shared/reused across characters, same as real
+    // Havok's per-context state objects, so this throttles combined traffic
+    // across every character currently in this state).
+    mutable unsigned long m_diagCallCounter = 0;
 
     void setSpeed(hkReal s) { m_speed = s; }
     void setGain(hkReal g) { m_gain = g; }
     void setMaxLinearAcceleration(hkReal a) { m_maxLinearAcceleration = a; }
     void setDisableHorizontalProjection(bool v) { m_disableHorizontalProjection = v; }
 
-    virtual void handle(const hkpCharacterInput& in, hkpCharacterOutput& out) {
-        // Simplified: drive current velocity toward the desired forward
-        // speed + preserve/append gravity along "down", clamped by gain and
-        // max acceleration. See class-level doc comment above.
+protected:
+    // Shared drive-toward-desired-speed logic used by every state's handle():
+    // exponentially approach forward*inputUD*speed, clamped by gain/max
+    // acceleration. Unchanged from the original single handle()
+    // implementation -- see the sign-convention comment below.
+    hkVector4 driveVelocity(const hkpCharacterInput& in) const {
         hkVector4 desired;
         // Sign convention: drive along -m_forward, not +m_forward.
         //
@@ -1324,6 +1368,7 @@ public:
         // this shim's simplified handle() did not, which made arrow-up drive
         // the hovercraft backwards while steering behaved correctly -- reported
         // by a human tester, since nothing headless can press a key.
+        // NOT touched by this task: verified correct, do not change.
         desired.setMul4(-in.m_inputUD * m_speed, in.m_forward);
         hkVector4 delta = desired - in.m_velocity;
         hkReal dt = in.m_stepInfo.m_deltaTime;
@@ -1332,12 +1377,124 @@ public:
         if (deltaLen > maxDelta && deltaLen > 1e-6f) {
             delta.mul4(maxDelta / deltaLen);
         }
-        out.m_velocity = in.m_velocity + delta;
-        out.m_velocity = out.m_velocity + hkVector4(in.m_characterGravity.v * dt);
+        return in.m_velocity + delta;
+    }
+
+    // Shim-level safety net (see kCharacterVelocitySafetyClamp above): reject
+    // non-finite results outright (a single NaN here used to propagate into
+    // the craft's up vector and permanently corrupt it -- see the launch bug
+    // this task fixes), then clamp magnitude. No real-Havok equivalent.
+    void applySafetyClamp(const hkpCharacterInput& in, hkpCharacterOutput& out) const {
+        const btVector3& v = out.m_velocity.v;
+        bool finite = std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+        if (!finite) {
+            out.m_velocity = in.m_velocity;
+            return;
+        }
+        hkReal len = out.m_velocity.length3();
+        if (len > kCharacterVelocitySafetyClamp && len > 1e-6f) {
+            out.m_velocity.mul4(kCharacterVelocitySafetyClamp / len);
+        }
+    }
+
+    // Permanent diagnostic support (see PhysicsDiag.h) -- no-op unless
+    // HU_PHYSICS_DIAG is set, throttled to once every 60 calls.
+    void diagLogState(const char* stateName, const hkpCharacterInput& in, const hkpCharacterOutput& out) const {
+        if (!havok_compat::physicsDiagEnabled()) return;
+        if ((++m_diagCallCounter % 60) != 0) return;
+        const btVector3& n = in.m_surfaceInfo.m_surfaceNormal.v;
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "characterState[%s]: supported=%d planetGravity=%d normal=(%.3f,%.3f,%.3f) |vIn|=%.2f |vOut|=%.2f",
+            stateName, in.m_surfaceInfo.m_supported ? 1 : 0,
+            in.m_surfaceInfo.m_planetGravityActive ? 1 : 0,
+            n.x(), n.y(), n.z(), in.m_velocity.length3(), out.m_velocity.length3());
+        havok_compat::diagLog(buf);
+    }
+
+public:
+    // Fallback handle(): behaves like the original (pre-this-task)
+    // implementation, i.e. in-air-like (always applies m_characterGravity).
+    // Used for any state id not registered in the manager -- see
+    // hkpCharacterContext::update().
+    virtual void handle(const hkpCharacterInput& in, hkpCharacterOutput& out) {
+        out.m_velocity = driveVelocity(in);
+        out.m_velocity = out.m_velocity + hkVector4(in.m_characterGravity.v * in.m_stepInfo.m_deltaTime);
+        applySafetyClamp(in, out);
+        diagLogState("fallback", in, out);
     }
 };
-class hkpCharacterStateOnGround : public hkpCharacterState {};
-class hkpCharacterStateInAir : public hkpCharacterState {};
+
+// hkpCharacterStateOnGround: matches real Havok's key semantic difference
+// from "in air" -- gravity is NOT added while supported (the ground/hover
+// reaction is what holds the character up), and any velocity component
+// driving INTO the surface is removed every step rather than allowed to
+// accumulate. This is the fix for the launch-into-space bug: previously the
+// base handle() added m_characterGravity unconditionally even while
+// supported, which stacked with the game's own PlanetGravityAction and
+// Bullet's world gravity, then fought the hover spring's 1/dist singularity
+// near the surface hard enough to eject the craft.
+class hkpCharacterStateOnGround : public hkpCharacterState {
+public:
+    void handle(const hkpCharacterInput& in, hkpCharacterOutput& out) override {
+        out.m_velocity = driveVelocity(in);
+
+        // Project out only the into-surface component of velocity (along
+        // -m_surfaceNormal); leave any away-from-surface component
+        // untouched. That is what still lets the character leave the
+        // ground: a hover-spring impulse, a ramp, or a jump can all still
+        // push m_velocity away from the surface (positive dot with the
+        // normal) and this state will pass that through unmodified -- it
+        // only ever subtracts the opposing component, never clamps upward
+        // motion or pushes the character back down.
+        hkVector4 normal = in.m_surfaceInfo.m_surfaceNormal;
+        const btVector3& nv = normal.v;
+        bool normalFinite = std::isfinite(nv.x()) && std::isfinite(nv.y()) && std::isfinite(nv.z());
+        hkReal normalLenSq = normal.lengthSquared3();
+        if (!normalFinite || normalLenSq < 1e-8f) {
+            normal = in.m_up; // guard: fall back to "up" if checkSupport gave us a degenerate normal
+        } else {
+            normal.mul4(1.0f / std::sqrt(normalLenSq));
+        }
+
+        hkReal intoSurface = out.m_velocity.dot3(normal); // negative == moving into the surface
+        if (intoSurface < 0.0f) {
+            hkVector4 correction;
+            correction.setMul4(-intoSurface, normal);
+            out.m_velocity = out.m_velocity + correction;
+        }
+
+        applySafetyClamp(in, out);
+        diagLogState("OnGround", in, out);
+    }
+};
+
+// hkpCharacterStateInAir: same drive logic as the fallback, but kept as its
+// own explicit override (rather than relying on inheriting the base) so its
+// behavior stays correct/documented even if the base fallback's semantics
+// ever change. The game relies on being able to steer/accelerate while
+// airborne, so input handling is unchanged here.
+//
+// m_characterGravity is applied only when no PlanetGravityAction is
+// currently acting on this character (in.m_surfaceInfo.m_planetGravityActive
+// set by hkpCharacterRigidBody::checkSupport()). Planet gravity supersedes
+// character gravity rather than stacking with it -- see docs/porting/
+// physics-model.md section 4 for the measured A/B that motivated this
+// (with both sources, SimpleTrack2's asteroid-to-asteroid jump was
+// unmakeable; with only planet gravity, both the human player and the bot
+// clear it). Havok/CharacterGravity remains the fallback for a character
+// that is airborne over ground with no planet gravity field acting.
+class hkpCharacterStateInAir : public hkpCharacterState {
+public:
+    void handle(const hkpCharacterInput& in, hkpCharacterOutput& out) override {
+        out.m_velocity = driveVelocity(in);
+        if (!in.m_surfaceInfo.m_planetGravityActive) {
+            out.m_velocity = out.m_velocity + hkVector4(in.m_characterGravity.v * in.m_stepInfo.m_deltaTime);
+        }
+        applySafetyClamp(in, out);
+        diagLogState("InAir", in, out);
+    }
+};
 class hkpCharacterStateJumping : public hkpCharacterState {};
 class hkpCharacterStateClimbing : public hkpCharacterState {};
 
@@ -1406,6 +1563,8 @@ class hkpCharacterRigidBody : public hkReferencedObject {
 public:
     hkpRigidBody* m_rigidBody = nullptr;
     hkVector4 m_up = hkVector4(0, 1, 0);
+    // Step counter for the HU_PHYSICS_DIAG trajectory trace in checkSupport().
+    unsigned long m_diagStepCounter = 0;
     hkpCharacterRigidBodyListener* m_listener = nullptr;
     hkpWorld* m_world = nullptr; // set post-hoc by whoever adds m_rigidBody to a world; see HavokHovercraft::load
 

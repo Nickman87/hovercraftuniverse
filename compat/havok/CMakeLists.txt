@@ -11,6 +11,10 @@ add_library(hu_havok_compat STATIC
     # docs/porting/phase-b-collision.md section 3.1. Ogre-free by design;
     # implemented by the new hu_collision module (modern/CMakeLists.txt).
     ${CMAKE_CURRENT_SOURCE_DIR}/include/havok_compat/CollisionProvider.h
+    # Off-by-default (HU_PHYSICS_DIAG) diagnostic logging for physics
+    # queries -- see docs/porting/physics-model.md section 5 and CLAUDE.md's
+    # PID-in-filename rule.
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/havok_compat/PhysicsDiag.h
 )
 
 target_include_directories(hu_havok_compat PUBLIC
