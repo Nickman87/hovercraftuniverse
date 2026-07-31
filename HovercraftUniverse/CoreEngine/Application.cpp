@@ -120,6 +120,12 @@ void Application::createRoot() {
 	// .material script Ogre compiles -- both at startup and for each
 	// race's "Track" resource group.
 	DuplicateMaterialScriptCompilerListener::install();
+
+	// Ogre 14 API fix / port workaround (docs/porting/ogre-api-gap.md): see
+	// the LegacyMeshLodListener.h include comment in Application.h. Installed
+	// here, alongside the other MeshManager/ScriptCompilerManager listener,
+	// so every mesh load is covered -- both at startup and per-race.
+	LegacyMeshLodListener::install();
 }
 
 void Application::defineResources() {

@@ -610,6 +610,14 @@ add_library(hu_coreengine STATIC
     # in the shipped .material scripts.
     ${HU_COREENGINE_ROOT}/DuplicateMaterialScriptCompilerListener.cpp
 
+    # New file pair (not part of the original CoreEngine.vcproj -- see the
+    # LegacyMeshLodListener.h class comment and the Ogre-14-API-fix comment
+    # in Application.cpp's createRoot()): strips LOD levels from legacy-
+    # format meshes, working around a distance-dependent rendering artifact
+    # on SimpleTrack2's asteroids. Deliberate port workaround, not a
+    # root-cause fix -- see docs/porting/ogre-api-gap.md.
+    ${HU_COREENGINE_ROOT}/LegacyMeshLodListener.cpp
+
     # Also re-enabled: RaceCamera.cpp/.h and GameView.cpp/.h were previously
     # excluded for a SEPARATE reason from the GUI/Sound taint above -- real
     # Ogre 1.7->14 Camera API breakage (Ogre::Camera's nodeless positioning
@@ -655,6 +663,7 @@ add_library(hu_coreengine STATIC
     ${HU_COREENGINE_ROOT}/RepresentationManager.h
     ${HU_COREENGINE_ROOT}/Application.h
     ${HU_COREENGINE_ROOT}/DuplicateMaterialScriptCompilerListener.h
+    ${HU_COREENGINE_ROOT}/LegacyMeshLodListener.h
 
     # TODO(modernize): still excluded, but NOT for ZoidCom/Networking reasons
     # anymore -- the shim resolves that taint. Two independent kinds of

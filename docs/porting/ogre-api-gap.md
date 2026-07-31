@@ -128,3 +128,80 @@ include paths + `OverlaySystem` registration, `ST_GENERIC`->string SceneManager
 creation, and the one Cg shader). Do not attempt to source-build 1.9/1.12 — it does
 not reduce the measured porting effort and adds a maintenance burden the vcpkg
 migration was meant to remove.
+
+## SimpleTrack2 distance-dependent rendering artifact -- mesh LOD
+
+**Symptom:** on SimpleTrack2, stable, geometry-shaped black patches appear on
+the asteroids at moderate camera distance and resolve correctly as the
+camera approaches. Not shimmering or flickering -- the same patches, same
+shape, every frame, at a given distance.
+
+**Hypotheses eliminated by experiment before the real cause was found:**
+
+1. **Shadows.** Forcing `SHADOWTYPE_NONE` changed nothing. Ruled out.
+2. **Mipmaps.** Forcing `TextureManager::setDefaultNumMipmaps(0)` changed
+   nothing. Ruled out.
+3. **Far-plane clipping.** `RaceCamera` uses a far plane of 30000, far beyond
+   the distance at which the artifact appears. Ruled out.
+4. **Material LOD.** None of the shipped `.material` scripts use
+   `lod_distances`/`lod_strategy`. Ruled out.
+5. **Z-fighting.** The artifact is perfectly stable at a given camera
+   distance, not shimmering -- inconsistent with a depth-precision race.
+   Ruled out.
+
+**Confirmed cause: mesh LOD.** Of the 24 meshes SimpleTrack2 loads, 17
+(including `Asteroid01.mesh` and `Asteroid02.mesh` -- exactly the meshes
+showing the artifact) carry 3 LOD levels each. Ogre logs these meshes as
+using "an old format [MeshSerializer_v1.41]" on load. A temporary
+experiment (a per-300-frame sweep in `Application::startRenderLoop()` that
+logged each loaded mesh's LOD level count and called
+`Mesh::removeLodLevels()`) made the artifacts disappear within a second of
+starting the game, verified by a human tester. That experiment has been
+reverted; the permanent fix is `LegacyMeshLodListener`
+(`HovercraftUniverse/CoreEngine/LegacyMeshLodListener.h/.cpp`), installed
+from `Application::createRoot()` next to
+`DuplicateMaterialScriptCompilerListener::install()`. It implements
+`Ogre::MeshSerializerListener::processMeshCompleted()` and repairs the LOD
+data on any mesh with more than one LOD level, as each mesh finishes loading.
+
+**Root cause: `value` is never derived from `userValue` for legacy-format
+meshes.** An `Ogre::MeshLodUsage` carries both. `userValue` is the switch
+distance as authored; `value` is what the LOD strategy actually compares
+against the camera every frame, normally produced by
+`LodStrategy::transformUserValue(userValue)` (the default distance strategy
+squares it, so it can compare against squared distances and skip a square
+root per object per frame). Loading a `MeshSerializer_v1.41` mesh populates
+`userValue` but leaves `value` at zero. Measured on every LOD-bearing mesh in
+SimpleTrack2 -- `Asteroid01`, `Asteroid02`, `Rock01`, `Check01`, and the rest
+are all identical:
+
+```
+Before: [0: value=0 userValue=0] [1: value=0 userValue=200] [2: value=0 userValue=400]
+```
+
+With every level's threshold at 0 the level selection is meaningless, and the
+renderer shows heavily decimated geometry at distances where it should be
+showing full detail -- exactly "black patches at range that resolve as you
+approach".
+
+**The fix** is one call: `Mesh::setLodStrategy()` re-derives `value` for every
+level (level 0 gets the strategy's base value, the rest get
+`transformUserValue(userValue)`). Re-applying the current default strategy
+after load reconstructs precisely the data Ogre needs:
+
+```
+After:  [0: value=0 userValue=0] [1: value=40000 userValue=200] [2: value=160000 userValue=400]
+```
+
+40000 = 200^2 and 160000 = 400^2, confirming both the squaring convention and
+that LOD now switches at the authored distances.
+
+This **keeps the authored LOD levels working** rather than discarding them,
+and touches nothing on disk -- the assets under `HovercraftUniverse/data/`
+stay byte-for-byte as recovered, which is a project deliverable.
+
+*(An earlier version of this listener called `mesh->removeLodLevels()`
+instead, as a workaround, before the `[LODDIAG]` numbers above identified the
+actual cause. Stripping LOD also cures the symptom -- these meshes are small
+by modern-GPU standards -- but there is no reason to throw the levels away
+now that the data can simply be repaired.)*

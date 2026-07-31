@@ -16,6 +16,10 @@
 // ScriptCompilerListener that restores Ogre 1.7's first-definition-wins
 // handling of the shipped .material scripts' duplicate material names.
 #include "DuplicateMaterialScriptCompilerListener.h"
+// Ogre 14 API fix / port workaround (docs/porting/ogre-api-gap.md): see the
+// LegacyMeshLodListener.h comment -- strips LOD levels from legacy-format
+// meshes to work around a distance-dependent rendering artifact.
+#include "LegacyMeshLodListener.h"
 #include "EntityManager.h"
 #include "InputManager.h"
 #include "GameStateManager.h"
