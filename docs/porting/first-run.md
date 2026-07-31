@@ -666,3 +666,67 @@ has never lost focus. It is not a usable health signal here, and it misled this
 investigation twice -- first read as evidence of a hang, later used as a success
 criterion for the message-pump fix. Judge health by CPU and by log progress
 instead.
+
+### 9.7 The world renders white: `d3dx9_43.dll` needs `D3DCompiler_43.dll`
+
+**Symptom.** A human tester reached a race and reported the track was entirely
+white -- geometry present, no textures. The client log explains it:
+
+```
+Program 'asteroidPS' is not supported: Cannot assemble D3D9 high-level shader asteroidPS
+Warning: material Asteroid01 has no supportable Techniques and will be blank. Explanation:
+Pass 0: fragment program asteroidPS cannot be used - compile error
+```
+
+`asteroidPS` is the terrain-blend pixel shader used by most track materials
+(Bavaraf, Junkyard, SimpleTrack2), so when it fails those materials fall back to
+blank.
+
+**The misleading part.** The shader source is fine. Compiling
+`asteroidPS.hlsl` with the Windows SDK's `fxc.exe` succeeds at both `ps_2_0`
+and `ps_3_0`. That test proves nothing, though, because it uses the *wrong
+compiler*: Ogre's D3D9 render system calls **`D3DXCompileShader`** from the
+legacy `d3dx9_43.dll` (`RenderSystems/Direct3D9/src/OgreD3D9HLSLProgram.cpp:181`),
+not the modern `D3DCompiler_47` that `fxc` uses.
+
+**Cause.** Since the 2009-era SDKs, D3DX9 no longer contains the HLSL compiler
+-- it delegates to a matching `D3DCompiler_NN.dll`. The runtime layout shipped
+`d3dx9_43.dll` without `D3DCompiler_43.dll`, so every HLSL compile failed. It
+fails with a **null error buffer**, which is why Ogre's message carries no
+"Errors:" detail and looks like an unsupported profile rather than a missing
+dependency.
+
+The original game demonstrates the rule: it ships `d3dx9_42.dll` **paired with**
+`D3DCompiler_42.dll`, in both the exe directory and `data/` (already documented
+in `RUNNING.md`). The modern build needs the same pairing one version up.
+
+**Fix (runtime layout, not code).** Extract `D3DCompiler_43.dll` (x86) from
+`Jun2010_D3DCompiler_43_x86.cab` inside the Microsoft **DirectX End-User
+Runtimes (June 2010)** redistributable -- the same package `d3dx9_43.dll` came
+from -- and place it in **both** the run root and `data/`, matching the existing
+`d3dx9_43.dll` placement (the D3D9 plugin resolves imports from the process
+working directory, which is `data/`). Authenticode-verified: signed by Microsoft
+Corporation.
+
+Result: no shader errors, no "has no supportable Techniques" warnings, and the
+race still reaches `RACING`.
+
+**Follow-up owed**: `scripts/bootstrap-modern-deps.ps1` should learn about this
+pairing so a fresh bootstrap does not rediscover it.
+
+### 9.8 Runtime config contamination from `local-game/`
+
+`C:\hu-modern-run` was seeded by copying `local-game/` wholesale. That directory
+had been **deliberately modified** earlier for a 60 Hz experiment against the
+*original* binary, which has the 30 Hz tuning constants compiled in -- so its
+`engine_settings.cfg` carried `TurnAngle=0.06`, a pre-compensated value, where
+the repo has the authored `0.12`.
+
+The modern build normalizes tuning constants against a documented 30 Hz
+reference itself (`HU_PHYSICS_REFERENCE_RATE`, see
+[timing-and-smoothing.md](timing-and-smoothing.md)), so it was applying the
+compensation twice and steering at half strength.
+
+Re-synced from the repo. **General hazard worth remembering: `local-game/` is a
+deliberately-modified reference, not a pristine source.** Anything seeded from it
+should be diffed against the repo rather than trusted.
