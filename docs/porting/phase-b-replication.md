@@ -417,3 +417,72 @@ Two observations from the same human test session that are not accounted for:
   log — it simply stops after `[Lobby]: Received initial lobby information`.
 
 Both need reproducing before they can be diagnosed. Neither blocks the handshake fix.
+
+## 11. Announcement must not depend on announce *data* (chat)
+
+**Symptom.** In the lobby you could type a chat message and see the characters
+appear, but pressing send made the line vanish. Nothing was echoed back, and
+no chat-related Flash invocation was ever made. The log showed the game side
+working perfectly:
+
+```
+15:24:38: [LobbyState]: Sending chat message: very nice
+```
+
+...and nothing after it. Easy to mistake for a Hikari/Flash problem, which is
+where the investigation started. It was not.
+
+**Cause, in the shim.** Chat runs over its own control pair
+(`ChatServer`/`ChatClient`, UDP 2377), entirely separate from the game's
+`HUServerCore`/`HUClient`. The client's `ChatEntity` is created only in
+`ChatClient::onNodeDynamic()`, i.e. only in response to a `NODE_CREATE`. That
+message never arrived, so `ChatClient::mChat` stayed `NULL` — and both
+directions then died *silently* behind their `if (mChat)` guards:
+`ChatClient::sendText()` dropped the outgoing line on the floor, and there was
+no entity for an incoming one to be delivered to.
+
+The `NODE_CREATE` never arrived because this shim only ever queued a **dynamic**
+authority node's announcement from `ZCom_Node::setAnnounceData()`, which
+`NetworkEntity::networkRegister()` calls only when passed `announce = true`.
+That conflated two different things. In real ZoidCom the announce-data blob is
+*optional payload riding along with* the announcement; it is not a switch
+controlling whether the announcement happens at all.
+
+`ChatEntity` is the one server-side node in the entire game that takes the
+`announce = false` default ([ChatServer.cpp:16](../../HovercraftUniverse/Networking/ChatServer.cpp)) —
+every other one passes `true` explicitly. So it was the only node the bug
+could bite, and it bit it completely.
+
+There was a second, independent ordering bug in the same area:
+`ZCom_processInput()`'s connection-accept path walked `unique_nodes_by_class`
+only, so a *dynamic* authority node registered **before** a connection existed
+was never announced to that connection. `ChatEntity` is registered in the
+`ChatServer` constructor, before any client can possibly have connected, so it
+tripped both. Every other dynamic node in the game is created per-connection or
+per-race, i.e. after the client is already connected, which is why the gap
+stayed invisible.
+
+**Fix** (three changes, all in `compat/zoidcom/`):
+
+1. `ZCom_Node::registerNodeDynamic()` queues the announcement to all existing
+   connections for an authority node, mirroring what `registerNodeUnique()`
+   already did. Announcement is now independent of announce data.
+2. `ZCom_Node::ZCom_shimQueueAnnounce()` is idempotent — several call sites can
+   legitimately reach it for the same connection (`registerNodeDynamic()` then
+   `setAnnounceData()` is the common one), and a second `NODE_CREATE` would
+   materialise a **duplicate node** on the remote side. It still re-applies any
+   newer `setOwner()` intent before bailing out.
+3. `ZCom_Control::ZCom_processInput()`'s accept path walks the full
+   `nodes_by_netid` registry (which holds unique and dynamic nodes alike)
+   instead of unique nodes only.
+
+**This matters beyond chat.** Change 3 removes an ordering dependency that
+would also have hit the **second client** in real multiplayer, which connects
+into a server that already has the first client's dynamic nodes registered.
+That was never exercised by 1-client-plus-bot testing.
+
+**Verified** 31/07/2026: `ChatEntity` announced with role 2 (Owner, as
+`ChatServer::ZCom_cbConnectionSpawned()` intends); `addText(...)` reaches Flash
+on send; two-process run still reaches `RACING` with exactly 2 `PlayerSettings`
+/ 2 `RacePlayer` / 2 `Hovercraft` / 2 `addUser` — no duplicated nodes, so the
+idempotence guard holds.

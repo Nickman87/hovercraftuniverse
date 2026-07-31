@@ -601,7 +601,34 @@ bool ZCom_Node::registerNodeDynamic(ZCom_ClassID _classid, ZCom_Control* _contro
     // node's network id (and, for the proxy case, its authority connection)
     // into the control's registry.
     eZCom_NodeRole role = _control->ZCom_shimRegisterDynamicNode(this);
-    return registerCommon(m_priv, _classid, role, _control);
+    if (!registerCommon(m_priv, _classid, role, _control)) return false;
+
+    // Announcement must not depend on announce *data*.
+    //
+    // This shim used to queue a dynamic authority node's NODE_CREATE only
+    // from setAnnounceData(), so a node registered without announce data was
+    // never announced to anybody and simply did not exist on the clients.
+    // Real ZoidCom announces every relevant authority node on registration;
+    // the announce-data blob is optional payload riding along with that
+    // message, not a switch controlling whether it is sent.
+    //
+    // Every server-side dynamic node in the game passes announce=true to
+    // NetworkEntity::networkRegister() -- except ChatServer's ChatEntity
+    // (ChatServer.cpp), which takes the `announce = false` default. That is
+    // why the chat entity never reached the client, ChatClient::mChat stayed
+    // NULL, and both ChatClient::sendText() and the incoming-message path
+    // silently did nothing behind their `if (mChat)` guards: typing worked,
+    // pressing send dropped the line on the floor.
+    //
+    // Queueing here mirrors registerNodeUnique() above. ZCom_shimQueueAnnounce()
+    // is idempotent, so setAnnounceData()'s own loop (which still runs for the
+    // announce=true callers, immediately after this, before any flush) tops up
+    // the payload rather than queueing a second NODE_CREATE.
+    if (role == eZCom_RoleAuthority) {
+        std::vector<ZCom_ConnID> conns = _control->ZCom_shimAllConnections();
+        for (size_t i = 0; i < conns.size(); i++) ZCom_shimQueueAnnounce(conns[i]);
+    }
+    return true;
 }
 
 bool ZCom_Node::registerRequestedNode(ZCom_ClassID _classid, ZCom_Control* _control) {
@@ -1013,6 +1040,21 @@ void ZCom_Node::ZCom_shimBindSelf(ZCom_NodeID _netid, ZCom_ConnID _authority_con
 }
 
 void ZCom_Node::ZCom_shimQueueAnnounce(ZCom_ConnID _conn) {
+    // Idempotent: a connection gets exactly one NODE_CREATE / NODE_LINK_UNIQUE
+    // from this node. Several call sites can legitimately reach here for the
+    // same connection -- registerNodeDynamic() followed by setAnnounceData()
+    // is the common one -- and a second NODE_CREATE would materialise a
+    // duplicate node on the remote side. Re-applying any newer setOwner()
+    // intent is still correct and useful, so do that before bailing out.
+    std::map<ZCom_ConnID, LinkedConn>::iterator existing = m_priv->linked_conns.find(_conn);
+    if (existing != m_priv->linked_conns.end()) {
+        std::map<ZCom_ConnID, bool>::const_iterator intent = m_priv->pending_owner_intent.find(_conn);
+        if (intent != m_priv->pending_owner_intent.end() && !existing->second.announced) {
+            existing->second.role = intent->second ? eZCom_RoleOwner : eZCom_RoleProxy;
+        }
+        return;
+    }
+
     LinkedConn entry;
     entry.role = eZCom_RoleProxy;
     entry.announced = false;

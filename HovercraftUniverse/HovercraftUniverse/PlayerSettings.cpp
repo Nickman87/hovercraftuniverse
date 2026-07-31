@@ -96,9 +96,36 @@ void PlayerSettings::parseEvents(eZCom_Event type, eZCom_NodeRole remote_role, Z
 		InitEvent* init = dynamic_cast<InitEvent*> (gEvent);
 		if (init) {
 			ZCom_BitStream* state = init->getStream();
-			mPlayerName = state->getString();
-			mHovercraft = state->getInt(4);
-			mCharacter = state->getInt(4);
+			// Always consume the stream in full, regardless of whether we
+			// apply it below -- the bitstream's read cursor must advance by
+			// the exact amount that was written (see
+			// zoidcom-original-semantics.md's onDataReceived() note: "forward
+			// the bitstream by the exact amount of bytes originally sent").
+			Ogre::String newName = state->getString();
+			unsigned int newHov = state->getInt(4);
+			unsigned int newChar = state->getInt(4);
+			// name/hovercraft/character are all declared OWNER_2_AUTH in
+			// setupReplication() below -- this owner's own node is the
+			// authoritative source for them, never the authority. The
+			// authority's InitEvent snapshot reflects whatever it has on
+			// file *at the moment this connection linked*, which for a
+			// brand-new per-connection node is still the constructor's
+			// blank default (see PlayerSettings(Lobby*, unsigned int)):
+			// the owner hasn't had a chance to push its real values up via
+			// replication yet. Applying that stale snapshot to the owner's
+			// own copy would silently erase whatever the owner just set
+			// locally (e.g. HUClient::onNodeDynamic() applying the
+			// configured player name/character/hovercraft) with no way to
+			// ever correct it afterwards, since AUTH_2_PROXY deliberately
+			// excludes Owner from being overwritten by later replication
+			// ticks either. A genuine proxy (any other client's view of
+			// this player) has no such local authority and must apply the
+			// snapshot to have anything to show at all.
+			if (mNode->getRole() != eZCom_RoleOwner) {
+				mPlayerName = newName;
+				mHovercraft = newHov;
+				mCharacter = newChar;
+			}
 		}
 
 		delete gEvent;

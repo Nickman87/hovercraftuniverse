@@ -187,6 +187,39 @@ namespace HovUni {
 			if (!player->isBot()) {
 				mLobbyGUI->addUser(player->getID(), player->getPlayerName(), player->getCharacter(), player->getHovercraft());
 			}
+
+			// onJoin() (which normally creates this
+			// player's PlayerSettingsInterceptor) is dispatched by
+			// Lobby::addPlayer() as soon as the dynamic PlayerSettings node
+			// is created -- for our own node, that happens on HUClient's
+			// background connect thread (ClientConnectThread), synchronously
+			// within its very first ZCom process() call, since the shim's
+			// in-process ENet transport drains the whole connect handshake
+			// (connect reply + Lobby/PlayerSettings NODE_CREATE + the
+			// InitEvent round trip) in one go -- well before this activate()
+			// call ever runs on the main thread and registers as a Lobby
+			// listener (mClient->getLobby()->addListener(this), above). Any
+			// player already present at this point (in practice: our own
+			// entry) therefore never reached LobbyState::onJoin() and has no
+			// interceptor, so PlayerSettingsInterceptor::in/outPostUpdate()
+			// never has anything to call onPlayerUpdate() on -- silently
+			// dropping the one-time initial sync (editUser/setHovercraft)
+			// that onPlayerUpdate() would otherwise have delivered. Create
+			// the missing interceptor here, exactly like onJoin() does, for
+			// any player this instance hasn't already seen.
+			if (mPlayerInterceptors.find(player->getID()) == mPlayerInterceptors.end()) {
+				PlayerSettingsInterceptor* intercept = new PlayerSettingsInterceptor(player, this);
+				mPlayerInterceptors.insert(std::pair<int, PlayerSettingsInterceptor*>(player->getID(), intercept));
+			}
+		}
+
+		// Same reasoning as above: if onPlayerUpdate() was never dispatched
+		// for our own player, the hovercraft selection box was never told
+		// what we picked (only onPlayerUpdate() calls setHovercraft() for
+		// the local player -- see onPlayerUpdate() above). Make sure the
+		// selection box reflects our own already-configured choice now.
+		if (mLobby->getOwnPlayer()) {
+			mLobbyGUI->setHovercraft(mLobby->getOwnPlayer()->getHovercraftID(), mLobby->getOwnPlayer()->getHovercraft());
 		}
 
 		//Activate all possible interception listeners

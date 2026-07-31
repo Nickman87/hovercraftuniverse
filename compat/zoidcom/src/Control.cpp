@@ -767,18 +767,37 @@ void ZCom_Control::ZCom_processInput(eZCom_BlockMode _block) {
                         m_priv->awaiting_connect_request.erase(from_conn);
 
                         if (accept) {
-                            // Phase B: link any locally-registered authority
-                            // *unique* nodes to this newly-accepted connection
-                            // BEFORE notifying the game via
-                            // ZCom_cbConnectionSpawned() -- so that if the game
-                            // synchronously calls setOwner() in response (e.g.
-                            // Lobby::onConnect() granting admin), the connection
-                            // is already linked and the promotion isn't silently
-                            // dropped. See phase-b-replication.md §3.1/§6.1.
-                            for (std::map<ZCom_ClassID, ZCom_Node*>::iterator uit = m_priv->unique_nodes_by_class.begin();
-                                 uit != m_priv->unique_nodes_by_class.end(); ++uit) {
-                                if (uit->second->getRole() == eZCom_RoleAuthority) {
-                                    uit->second->ZCom_shimQueueAnnounce(from_conn);
+                            // Phase B: link every locally-registered authority
+                            // node to this newly-accepted connection BEFORE
+                            // notifying the game via ZCom_cbConnectionSpawned()
+                            // -- so that if the game synchronously calls
+                            // setOwner() in response (e.g. Lobby::onConnect()
+                            // granting admin, ChatServer::ZCom_cbConnectionSpawned()
+                            // marking the new peer an owner of the chat entity),
+                            // the connection is already linked and the promotion
+                            // isn't silently dropped. See phase-b-replication.md
+                            // §3.1/§6.1.
+                            //
+                            // This used to walk unique_nodes_by_class only, which
+                            // made announcement depend on registration order: a
+                            // *dynamic* authority node registered before the
+                            // connection existed was never announced to it. Every
+                            // such node the game creates per-connection or
+                            // per-race (PlayerSettings, RaceState, the loaded
+                            // entities) happens to be registered after the client
+                            // connects, so the gap stayed invisible -- except for
+                            // ChatServer's ChatEntity, which is registered in the
+                            // ChatServer constructor, i.e. before any client can
+                            // possibly have connected. Walking the full netid
+                            // registry (which holds unique and dynamic nodes
+                            // alike) makes this order-independent, and matters
+                            // again for real multiplayer, where the second client
+                            // connects into a server that already has the first
+                            // client's dynamic nodes registered.
+                            for (std::map<ZCom_NodeID, ZCom_Node*>::iterator nit = m_priv->nodes_by_netid.begin();
+                                 nit != m_priv->nodes_by_netid.end(); ++nit) {
+                                if (nit->second && nit->second->getRole() == eZCom_RoleAuthority) {
+                                    nit->second->ZCom_shimQueueAnnounce(from_conn);
                                 }
                             }
                             ZCom_cbConnectionSpawned(from_conn);
