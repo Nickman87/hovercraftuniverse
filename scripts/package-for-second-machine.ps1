@@ -83,13 +83,19 @@ if ($LASTEXITCODE -ge 8) { Fail "robocopy failed with exit code $LASTEXITCODE" }
 # --- 2. The debug CRT ------------------------------------------------------
 Step 'Adding the x86 debug CRT (not redistributable -- see README)'
 
+# CAREFUL: match '*\x86\*', never '*x86*'. Both of these live under
+# "C:\Program Files (x86)\...", so a bare '*x86*' matches the x64 copy just as
+# happily as the x86 one -- and x64 sorts first, so -First 1 silently picks the
+# wrong architecture. That produced a package whose exe died on launch with
+# 0xC000007B (STATUS_INVALID_IMAGE_FORMAT) and nothing in any log. The
+# architecture assertion below exists so it can never happen quietly again.
 $crt = @{}
 $vcRedist = Get-ChildItem 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC' -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^\d+\.' } | Sort-Object Name -Descending | Select-Object -First 1
 if ($vcRedist) {
     foreach ($dll in @('msvcp140d.dll', 'vcruntime140d.dll')) {
         $hit = Get-ChildItem (Join-Path $vcRedist.FullName 'debug_nonredist') -Recurse -Filter $dll -ErrorAction SilentlyContinue |
-               Where-Object { $_.FullName -like '*x86*' } | Select-Object -First 1
+               Where-Object { $_.FullName -like '*\x86\*' } | Select-Object -First 1
         if ($hit) { $crt[$dll] = $hit.FullName }
     }
 }
@@ -105,6 +111,42 @@ foreach ($name in @('msvcp140d.dll', 'vcruntime140d.dll', 'ucrtbased.dll')) {
         Write-Host "    ! $name NOT FOUND -- the game will not start on a machine without Visual Studio" -ForegroundColor Yellow
     }
 }
+
+# --- 2b. Assert every binary is x86 ---------------------------------------
+# This is a Win32 build. A single x64 binary in here makes the exe fail at
+# load with 0xC000007B (STATUS_INVALID_IMAGE_FORMAT): a Windows error dialog,
+# no log output anywhere, and nothing for run-test-session.ps1 to collect --
+# so it is worth several seconds to catch it on the machine that can fix it.
+Step 'Verifying every packaged binary is x86'
+
+function Get-PeMachine([string] $path) {
+    try {
+        $fs = [IO.File]::OpenRead($path)
+        $br = New-Object IO.BinaryReader($fs)
+        $fs.Position = 0x3C
+        $fs.Position = $br.ReadInt32()
+        if ($br.ReadUInt32() -ne 0x00004550) { $br.Close(); return 'notPE' }  # 'PE\0\0'
+        $machine = $br.ReadUInt16()
+        $br.Close()
+        switch ($machine) {
+            0x014C  { 'x86' }
+            0x8664  { 'x64' }
+            0xAA64  { 'arm64' }
+            default { '0x{0:X}' -f $machine }
+        }
+    } catch { 'unreadable' }
+}
+
+$wrong = @()
+foreach ($bin in (Get-ChildItem $Runtime -Recurse -Include '*.dll', '*.exe' -File)) {
+    $arch = Get-PeMachine $bin.FullName
+    if ($arch -ne 'x86') { $wrong += [pscustomobject]@{ Name = $bin.Name; Arch = $arch } }
+}
+if ($wrong.Count -gt 0) {
+    $wrong | Format-Table -AutoSize | Out-String | Write-Host
+    Fail "$($wrong.Count) packaged binary/binaries are not x86 (see above). This build is Win32; the game would die at launch with 0xC000007B and no log output."
+}
+Write-Host '    all x86'
 
 # --- 3. install.ps1 on the target -----------------------------------------
 $installer = @'

@@ -290,6 +290,27 @@ switch ($Mode) {
     }
 }
 
+# A process that dies during image load -- a missing or wrong-architecture DLL
+# is the classic cause -- never gets far enough to open an Ogre log, so the run
+# folder fills with empty files and the script used to report nothing at all.
+# Windows shows a modal error box on the machine itself, which is no help when
+# the interesting machine is the other one. Catch it here instead.
+Start-Sleep -Seconds 3
+$dead = @($procs | Where-Object { $_.HasExited })
+if ($dead.Count -gt 0) {
+    foreach ($p in $dead) {
+        $code = $p.ExitCode
+        $hex  = '0x{0:X8}' -f ([uint32] ($code -band 0xFFFFFFFF))
+        Write-Host "!!! PID $($p.Id) exited immediately, code $hex ($code)" -ForegroundColor Red
+        switch ($hex) {
+            '0xC000007B' { Write-Host '    STATUS_INVALID_IMAGE_FORMAT -- a DLL next to the exe is the wrong architecture. This build is Win32, so every DLL must be x86. If this machine was set up from dist\second-machine, re-run package-for-second-machine.ps1 on the build machine (it now asserts this) and re-install.' -ForegroundColor Yellow }
+            '0xC0000135' { Write-Host '    STATUS_DLL_NOT_FOUND -- a required DLL is missing next to the exe. On a machine without Visual Studio this is usually the debug CRT (msvcp140d/vcruntime140d/ucrtbased).' -ForegroundColor Yellow }
+            '0xC0000142' { Write-Host '    STATUS_DLL_INIT_FAILED -- a DLL loaded but failed to initialise.' -ForegroundColor Yellow }
+        }
+    }
+    Fail 'Nothing to test -- the game did not start. Logs in the run folder will be empty.'
+}
+
 if ($Seconds -le 0) {
     Step "Left running for interactive testing. When finished, stop the game and run:"
     Write-Host "    .\scripts\run-test-session.ps1 -Collect" -ForegroundColor Yellow
