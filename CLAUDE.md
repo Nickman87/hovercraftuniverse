@@ -130,5 +130,12 @@ Log layout worth knowing:
   (`SinglePlayerServer.log` is never created). Bugs that reproduce only in
   single-player are usually about that sharing -- always check whether the
   two-process path behaves differently before blaming game logic.
+- **Race progress is on stdout, not in the Ogre log.** `RaceState`'s
+  checkpoint/start/finish reporting uses `std::cout`, so it lands in
+  `server.stdout.log` in the *launching* run folder -- not in
+  `DedicatedServer.log`, and not in anything `-Collect` produces. Look there
+  first when a race does not end. Checkpoints are strictly sequential and a
+  missed one silently blocks the finish with no in-game feedback (original
+  2010 behaviour).
 - Any temporary diagnostic logging must include the PID in its filename. A
   single hardcoded name is ambiguous the moment two processes write to it.

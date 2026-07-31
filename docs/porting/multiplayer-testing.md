@@ -134,11 +134,19 @@ Remove it again with
 
 ### 3. Run it
 
-Hosting machine:
+Hosting machine -- server **and** a local client, so the host is a player too:
 
 ```powershell
-.\scripts\run-test-session.ps1 -Mode server -Seconds 0
+.\scripts\run-test-session.ps1 -Mode multiplayer -Clients 1 -NoStart -Seconds 0
 ```
+
+`-NoStart` matters here: without it the host's client autostarts the race
+before the other machine has finished joining. Start it from the lobby GUI
+once both players are in.
+
+Use plain `-Mode server` only if the host is not playing. That gives one human
+plus a **bot**, which does not test client-to-client replication -- see the
+top of this document for why a bot is not a second client.
 
 Joining machine (get the host's LAN IP with `ipconfig`):
 
@@ -164,6 +172,34 @@ The client ignores any `:port` you give it and always connects to 2375.
 behaviour, not a regression. `--host=ip:port` parses the port in `main.cpp` but
 `onConnect()` drops it.
 
+## Race progress is on stdout, not in the Ogre log
+
+`RaceState::onCheckPoint()`, `onStart()` and `onFinish()` report with
+`std::cout`, not `Ogre::LogManager`. So the only record of who passed which
+checkpoint is **`server.stdout.log`, in the run folder of the session that
+launched the server** -- not `DedicatedServer.log`, and not anything
+`-Collect` produces (that snapshots the Ogre logs only).
+
+This is the one place to look when a race does not end:
+
+```
+21 reaches correct checkpoint 0
+20 reaches correct checkpoint 0
+20 reaches correct checkpoint 1
+21 reaches correct checkpoint 1
+21 reaches correct checkpoint 2
+finish ID is 3
+20 reaches incorrect finish, skipped checkpoint 2
+```
+
+Checkpoints are **strictly sequential**. `RacePlayer::addCheckpoint()` only
+accepts `checkpoint == mLastCheckpoint + 1` and silently ignores anything else,
+and `RaceState::onFinish()` refuses the finish unless the player's next
+expected checkpoint *is* the finish. Miss one and the rest of the lap cannot be
+completed, with no in-game feedback whatsoever -- you simply drive through the
+finish line and nothing happens. That is original 2010 behaviour, not a port
+regression, and it is an easy thing to mistake for a broken race.
+
 ## Verified so far
 
 Two clients + dedicated server, one machine (31/07/2026):
@@ -179,8 +215,17 @@ Two clients + dedicated server, one machine (31/07/2026):
   proxy replication of a human's name works in both directions.
 - Both reach `RACING` in the same second. Zero errors in any log.
 
-Still unverified: anything that needs two machines -- real latency, MTU, packet
-loss, firewall, and the InitEvent/interceptor ordering fixes under a handshake
-that does *not* complete synchronously (see phase-b-replication.md §11, and the
-lobby fixes in commit b3ec550, which were all found against an in-process
-transport that collapses several round trips into one call).
+Two machines over a real LAN, host running server-only (31/07/2026):
+
+- Client on the second machine connected to `192.168.0.182:2375`, reached the
+  lobby, saw the host-side player named correctly, **chat worked**, and the
+  race ran to `RACING` with zero errors in any log. So the lobby fixes in
+  b3ec550 and the chat fix hold up over a real network, not just over the
+  in-process transport they were diagnosed against.
+- The human did not finish, because they missed checkpoint 2 -- correct game
+  behaviour, confirmed in `server.stdout.log` (see above).
+
+Still unverified: **two humans on two machines**. The run above had the host on
+`-Mode server` with no local client, so the second racer was a bot, and
+client-to-client replication over a real network is still untested. Use the
+`-Mode multiplayer -Clients 1 -NoStart` recipe above on the host for that.
