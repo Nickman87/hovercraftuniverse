@@ -31,6 +31,34 @@
                  reconstruction, physics and rendering all share one process
                  and one Ogre log. Bugs that only appear here are usually
                  about that sharing.
+    multiplayer: dedicated server + -Clients N clients on THIS machine, each
+                 with its own generated config so they get separate Ogre logs
+                 and distinct player names. The cheap pre-flight for real
+                 multiplayer: it exercises two genuine ZCom_Control client
+                 instances in separate processes without needing a second
+                 machine. It is NOT a substitute for the real thing -- it
+                 shares a host, a clock and a loopback path.
+    join       : -Clients N clients on THIS machine pointed at a remote
+                 server via -Host. No local server is started. This is the
+                 second-machine half of a real multiplayer test.
+
+.PARAMETER Clients
+    How many client processes to launch (multiplayer/join modes). Each gets a
+    generated Client<N>.ini in the run dir with its own [Ogre] LogFile and
+    [Player] PlayerName, so the lobby can tell them apart and their logs do
+    not overwrite each other.
+
+.PARAMETER NoStart
+    multiplayer mode: connect the clients but do NOT start the race, so the
+    session sits in the lobby. Use this to watch lobby-phase behaviour (player
+    names, hovercraft selection, chat) which otherwise gets about three
+    seconds before --autostart tears the lobby down.
+
+.PARAMETER HostAddress
+    Server address for join mode (IP or hostname, optionally host:port).
+    Named HostAddress, not Host, because $Host is a reserved PowerShell
+    automatic variable. The game's UDP ports are 2375 (game) and 2377 (chat)
+    -- both must be reachable, they are separate ZCom_Control instances.
 
 .PARAMETER Seconds
     How long to let the session run before stopping it. Use 0 to leave it
@@ -55,12 +83,27 @@
     .\scripts\run-test-session.ps1 -Mode client -Seconds 0
     # ... play ...
     .\scripts\run-test-session.ps1 -Collect
+.EXAMPLE
+    # Local two-client pre-flight, one machine, no human input needed.
+    .\scripts\run-test-session.ps1 -Mode multiplayer -Clients 2 -Seconds 60
+.EXAMPLE
+    # Real two-machine test.
+    # On the hosting machine:
+    .\scripts\run-test-session.ps1 -Mode server -Seconds 0
+    # On the other machine (get the host's LAN IP with ipconfig):
+    .\scripts\run-test-session.ps1 -Mode join -HostAddress 192.168.1.42 -Clients 1 -Seconds 0
+    # NOTE: the client ignores any :port in -HostAddress and always uses 2375,
+    # exactly as the GUI "Join game" box does (MainMenuState::onConnect has
+    # carried a "TODO: Parse IP and Port?" since 2010).
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('twoprocess', 'server', 'client')]
+    [ValidateSet('twoprocess', 'server', 'client', 'multiplayer', 'join')]
     [string] $Mode = 'twoprocess',
     [int]    $Seconds = 45,
+    [int]    $Clients = 2,
+    [string] $HostAddress = '',
+    [switch] $NoStart,
     [switch] $Collect,
     [switch] $Debugger
 )
@@ -95,6 +138,10 @@ function Save-Logs([string] $dest) {
         (Join-Path $DataDir 'SinglePlayerServer.log'))) {
         if (Test-Path $src) { Copy-Item $src $dest -Force; $n++ }
     }
+    # Per-client logs from multiplayer/join modes (see New-ClientConfig).
+    foreach ($src in (Get-ChildItem $DataDir -Filter 'Client*.log' -ErrorAction SilentlyContinue)) {
+        Copy-Item $src.FullName $dest -Force; $n++
+    }
     foreach ($src in (Get-ChildItem $RunDir -Filter 'physics-diag*.log' -ErrorAction SilentlyContinue)) {
         Copy-Item $src.FullName $dest -Force; $n++
     }
@@ -126,7 +173,29 @@ Step ("Deployed exe: " + (Get-Item $Exe).LastWriteTime)
 foreach ($stale in @('HovercraftUniverse.log', 'DedicatedServer.log', 'SinglePlayerServer.log')) {
     Remove-Item (Join-Path $DataDir $stale) -Force -ErrorAction SilentlyContinue
 }
+Remove-Item (Join-Path $DataDir 'Client*.log') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $RunDir 'physics-diag*.log') -Force -ErrorAction SilentlyContinue
+
+# Two clients on one machine would otherwise share HovercraftUniverse.ini, and
+# so share [Ogre] LogFile (their Ogre logs overwrite each other, making the run
+# unreadable) and [Player] PlayerName (both appear in the lobby as the same
+# person). Generate a per-client config instead, derived from the real one so
+# the hand-fixed settings in C:\hu-modern-run are inherited rather than
+# reinvented. The game reads this via --config= (see main.cpp).
+function New-ClientConfig([int] $n) {
+    $master = Join-Path $RunDir 'HovercraftUniverse.ini'
+    if (-not (Test-Path $master)) { Fail "$master not found -- cannot derive a client config." }
+
+    $name = "Client$n.ini"
+    $dest = Join-Path $RunDir $name
+    $out  = foreach ($line in (Get-Content $master)) {
+        if     ($line -match '^\s*LogFile\s*=')    { "LogFile=Client$n.log" }
+        elseif ($line -match '^\s*PlayerName\s*=') { "PlayerName=Player$n" }
+        else                                       { $line }
+    }
+    Set-Content -Path $dest -Value $out -Encoding utf8
+    return $name
+}
 
 # cdb.exe ships inside the WinDbg MSIX package. Resolve it dynamically -- the
 # version is part of the path and changes when WinDbg updates. x86, to match
@@ -185,6 +254,39 @@ switch ($Mode) {
         $procs += Launch 'server' @('--server')
         Start-Sleep -Seconds 8
         $procs += Launch 'client' @('--autostart')
+    }
+    'multiplayer' {
+        if ($Clients -lt 1) { Fail '-Clients must be at least 1.' }
+        # RaceState fills empty slots only: bots = maxPlayers - humans (see
+        # RaceState.cpp). So FillWithBots=1 is harmless once the humans have
+        # joined; MaximumPlayers is the setting that actually gates them.
+        $maxp = (Select-String -Path (Join-Path $RunDir 'Server.ini') -Pattern '^\s*MaximumPlayers\s*=\s*(\d+)').Matches.Groups[1].Value
+        if ([int] $maxp -lt $Clients) {
+            Fail "Server.ini MaximumPlayers=$maxp but -Clients $Clients requested; the extra client(s) would be refused (Lobby::canJoin)."
+        }
+        Step "Server.ini MaximumPlayers=$maxp, launching $Clients client(s)."
+        $procs += Launch 'server' @('--server')
+        Start-Sleep -Seconds 8
+        for ($i = 1; $i -le $Clients; $i++) {
+            $cfg = New-ClientConfig $i
+            # Only the first client autoconnects-and-starts; it is the admin.
+            # The rest just autoconnect, so the race does not begin before
+            # they have actually joined the lobby.
+            $flags = if ($i -eq 1 -and -not $NoStart) { '--autostart' } else { '--autoconnect' }
+            $procs += Launch "client$i" @("--config=$cfg", $flags)
+            Start-Sleep -Seconds 3
+        }
+    }
+    'join' {
+        if (-not $HostAddress) { Fail 'join mode needs -HostAddress <ip> (the machine running --server).' }
+        if ($Clients -lt 1) { Fail '-Clients must be at least 1.' }
+        for ($i = 1; $i -le $Clients; $i++) {
+            $cfg = New-ClientConfig $i
+            # No --autostart here: on the joining machine you are not the
+            # admin, and the race is started from the hosting side.
+            $procs += Launch "client$i" @("--config=$cfg", "--host=$HostAddress", '--autoconnect')
+            Start-Sleep -Seconds 3
+        }
     }
 }
 

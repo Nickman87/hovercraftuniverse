@@ -88,6 +88,19 @@ namespace HovUni {
 	////////////////////////////////////////
 
 	void LobbyState::onPlayerUpdate(int id, const std::string& username, const std::string& character, const std::string& car) {
+		// Log what actually reaches the lobby GUI. The C++ -> Flash push is
+		// write-only (Hikari returns <undefined/> and the SWF cannot be
+		// queried), so without this there is no way to tell "the GUI was
+		// never told" from "the GUI was told and did not render it" -- the
+		// distinction that took the longest to establish when the lobby was
+		// showing blank names. Must be here, at the top: the delayed-user
+		// branch below returns early, and that is precisely the branch a
+		// late-arriving replicated name takes. Cheap: lobby-rate, not
+		// frame-rate.
+		Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+			<< "[LobbyState]: update user " << id << " '" << username << "' "
+			<< character << "/" << car;
+
 		//check if this user has already been announced
 		if (username != "") {
 			std::vector<unsigned int>::const_iterator it = mDelayedUsers.begin();
@@ -121,6 +134,10 @@ namespace HovUni {
 	void LobbyState::onJoin(PlayerSettings * settings) {
 		//Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream() << "[LobbyState]: onJoin was called! " << settings->getPlayerName() << " (" << settings->getID() << ")";
 		//Player has joined, add empty player to the visualisation
+		Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+			<< "[LobbyState]: join user " << settings->getID() << " '"
+			<< settings->getPlayerName() << "'"
+			<< (settings->getPlayerName() == "" ? " (name not yet replicated, deferred)" : "");
 		if (settings->getPlayerName() != "") {
 			mLobbyGUI->addUser(settings->getID(), settings->getPlayerName(), settings->getCharacter(), settings->getHovercraft());
 		} else {
@@ -185,6 +202,15 @@ namespace HovUni {
 		for (Lobby::playermap::const_iterator i = players.begin(); i != players.end(); ++i) {
 			PlayerSettings* player = (*i).second;
 			if (!player->isBot()) {
+				// Logged for the same reason as onJoin()/onPlayerUpdate():
+				// players already present when this state activates never
+				// pass through either of those, so without this they would
+				// be the one group of lobby entries with no trace at all of
+				// what the GUI was told about them.
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[LobbyState]: existing user " << player->getID() << " '"
+					<< player->getPlayerName() << "'"
+					<< (player->getPlayerName() == "" ? " (name not yet replicated)" : "");
 				mLobbyGUI->addUser(player->getID(), player->getPlayerName(), player->getCharacter(), player->getHovercraft());
 			}
 

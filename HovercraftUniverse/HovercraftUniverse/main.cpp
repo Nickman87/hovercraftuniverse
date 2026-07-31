@@ -41,6 +41,15 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 	// lobby and is recognised as admin. Without this flag, behaviour is
 	// unchanged.
 	bool autoStart = false;
+	// Test affordance (revival, task #20 -- multiplayer): --config=<file>
+	// overrides the client's config INI, which was hardcoded to
+	// "HovercraftUniverse.ini". Two clients on one machine otherwise share a
+	// config, which means they share [Ogre] LogFile (so their Ogre logs
+	// overwrite each other, making a two-client run unreadable) and share
+	// [Player] PlayerName (so both appear in the lobby as the same person,
+	// making it impossible to tell whose entry is whose). Without this flag
+	// on the command line, behaviour is unchanged.
+	Ogre::String configINI = "HovercraftUniverse.ini";
 	//parse all commandline parameters (seperated by spaces)
 	Ogre::String commandline (strCmdLine);
 	// Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): the
@@ -60,6 +69,8 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 				host = connectionstring.substr(0,pos);
 				port = Ogre::StringConverter::parseInt(connectionstring.substr(pos+1));
 			}
+		} else if (Ogre::StringUtil::startsWith(*i, "--config=")) {
+			configINI = (*i).substr(9);
 		} else if ((*i) == "--console") {
 			console = true;
 		} else if ((*i) == "--autoconnect") {
@@ -92,7 +103,7 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 			HovUni::Console::createConsole("HovercraftUniverse Debug Console");
 		}
 
-		HovUni::HUApplication app("HovercraftUniverse.ini");
+		HovUni::HUApplication app(configINI.c_str());
 		
 		try {
 			app.init();

@@ -91,7 +91,18 @@ hand:
 .\scripts\run-test-session.ps1 -Mode client -Seconds 0        # human testing
 .\scripts\run-test-session.ps1 -Collect                       # snapshot logs after
 .\scripts\run-test-session.ps1 -Mode client -Seconds 0 -Debugger   # catch a crash
+
+.\scripts\run-test-session.ps1 -Mode multiplayer -Clients 2 -Seconds 75  # two real clients
+.\scripts\run-test-session.ps1 -Mode multiplayer -Clients 2 -NoStart     # ...staying in the lobby
+.\scripts\run-test-session.ps1 -Mode join -HostAddress 192.168.1.42      # second machine
 ```
+
+**A bot is not a second client.** `twoprocess` never exercises a human's
+name/hovercraft travelling owner -> authority -> other proxies, because a bot's
+`PlayerSettings` is built on the server with its name already set. Use
+`multiplayer` mode for anything lobby- or replication-shaped.
+`docs/porting/multiplayer-testing.md` has the two-machine procedure (both UDP
+2375 *and* 2377 must be open -- chat is a separate control pair).
 
 `-Debugger` runs the game under `cdb.exe` (x86, from the WinDbg MSIX package;
 resolve the path via `Get-AppxPackage Microsoft.WinDbg`, the version is in the
