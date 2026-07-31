@@ -46,3 +46,7 @@ toolchain/vs2008-express/
 toolchain/dxsdk/
 toolchain/sandbox/artifacts/
 toolchain/sandbox/*.log
+
+# Packaged runtime for a second test machine (scripts/package-for-second-machine.ps1).
+# ~225 MB of build output. It belongs in the Synology sync, not in the repo.
+dist/

@@ -77,10 +77,39 @@ Verified so far on one machine only. The two-machine run is still to do.
 
 ### 1. Get the runtime onto the second machine
 
-Copy the whole `C:\hu-modern-run` folder. It is **not** reproducible from
-`local-game/` -- it holds hand-fixed runtime config and DLLs (see CLAUDE.md).
-Copy it wholesale rather than rebuilding it, then deploy new binaries onto it
-with the normal script.
+On the build machine, after `build-and-deploy.ps1`:
+
+```powershell
+.\scripts\package-for-second-machine.ps1
+```
+
+That copies `C:\hu-modern-run` (~220 MB) into `dist\second-machine\runtime\`
+**inside the project folder**, which is Synology-synced, so it reaches the
+other machines by itself. `dist/` is gitignored -- it is build output, and it
+belongs in the sync rather than the repo.
+
+`C:\hu-modern-run` is **not** reproducible from `local-game/` -- it holds
+hand-fixed runtime config and DLLs (see CLAUDE.md) -- so it is copied
+wholesale rather than rebuilt.
+
+Then on the second machine, from the synced project folder:
+
+```powershell
+.\dist\second-machine\install.ps1
+```
+
+which installs to that machine's own `C:\hu-modern-run`. Do **not** run the
+game straight out of the synced folder: these disks are network-backed and
+slow, and `run-test-session.ps1` expects `C:\hu-modern-run` anyway.
+
+**The debug CRT.** This is a `Debug|Win32` build, so the exe imports
+`msvcp140d.dll` / `vcruntime140d.dll` / `ucrtbased.dll`. Microsoft ships the
+debug CRT only with Visual Studio and excludes it from the redistributable, so
+a machine without VS -- exactly what a second test machine is -- cannot start
+the game. The packaging script bundles those three DLLs for that reason. Fine
+between your own machines; not something to hand to anyone else. The real fix,
+when the port gets there, is a Release build, which needs only the ordinary
+VC++ redistributable.
 
 ### 2. Open the ports on the hosting machine
 
