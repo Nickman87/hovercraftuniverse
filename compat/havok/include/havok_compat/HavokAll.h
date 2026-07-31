@@ -200,42 +200,99 @@ public:
 
 class hkRotation {
 public:
-    btMatrix3x3 m;
-    hkRotation() { m.setIdentity(); }
+    // Real Havok's hkRotation (like hkMatrix3) stores its 3x3 matrix as 3
+    // column hkVector4s, and game code commonly builds a rotation
+    // column-by-column via the idiom `rot.getColumn(i) = someVector;` --
+    // i.e. getColumn() returns a genuinely mutating reference straight into
+    // the matrix's own storage. HavokHovercraft.cpp's update() (game code,
+    // unmodified) relies on exactly that idiom to build its desired
+    // orientation out of mSide/mUp/cross(mSide,mUp):
+    //   newOrientation.getColumn(0) = mSide;
+    //   newOrientation.getColumn(1) = mUp;
+    //   newOrientation.getColumn(2).setCross(mSide, mUp);
+    //   newOrientation.renormalize();
+    //
+    // BUG (found while investigating "steering does nothing" / "AI bot
+    // drives off in a straight line" / "forward and backward are swapped"):
+    // this class used to back the matrix with a single btMatrix3x3 and fake
+    // getColumn()'s reference-into-storage semantics with a per-call cache
+    // array (`hkVector4 cached[3]`) refreshed from the matrix on every call.
+    // A cache refreshed from the matrix is not the same as a reference INTO
+    // the matrix: assigning through the returned reference
+    // (`getColumn(0) = mSide;`) only ever wrote `cached[0]`, while every
+    // subsequent read of the rotation (getColumnRaw(), renormalize(),
+    // hkQuaternion's matrix<->quaternion conversions) went straight through
+    // the untouched btMatrix3x3. There WAS a commitColumn(i) method to push
+    // a cached column back into the matrix, but nothing anywhere in the
+    // codebase ever called it (confirmed by grepping the game and this shim)
+    // -- so it was dead code, and every write via getColumn() was silently
+    // discarded.
+    //
+    // Net effect: `newOrientation` in HavokHovercraft.cpp::update() was
+    // always identity, no matter what mSide/mUp/steering input said.
+    // `input.m_forward = newOrientation.getColumn(2)` was therefore always
+    // a fixed WORLD-space axis (identity's column 2), never the hovercraft's
+    // actual heading -- and the angular-velocity controller a few lines
+    // later (`currentOrient.estimateAngleTo(desiredOrient, ...)`, desiredOrient
+    // built from this same always-identity newOrientation) always steered
+    // toward world-identity orientation, never toward whatever steering
+    // input asked for. That one bug explains all three reported symptoms:
+    // steering appearing completely dead (the desired orientation never
+    // reflected steering input), the AI bot flying off in a straight line
+    // (constant input.m_forward every step, so it could accelerate but
+    // never actually turn), and forward/backward looking inverted
+    // (accelerating always pushed along that fixed identity axis, which
+    // happens to be antiparallel to the entity's actual forward convention
+    // -- see Entity::getOrientation(), `mOrientation * NEGATIVE_UNIT_Z`).
+    //
+    // Fixed by making the 3 columns the actual ground truth storage (a
+    // real hkVector4[3]), so getColumn() returns a genuine, persistent
+    // reference that every later read observes immediately. btMatrix3x3 is
+    // now only ever constructed on demand, as a scratch conversion helper
+    // for quaternion<->matrix conversion -- never as the storage itself.
+    hkVector4 col[3];
 
-    void set(const hkQuaternion& q) { m.setRotation(q.q); }
-    void setIdentity() { m.setIdentity(); }
+    hkRotation() { setIdentity(); }
+
+    void set(const hkQuaternion& q) {
+        btMatrix3x3 bm(q.q);
+        for (int i = 0; i < 3; i++) col[i] = hkVector4(bm.getColumn(i));
+    }
+    void setIdentity() {
+        col[0].set(1, 0, 0);
+        col[1].set(0, 1, 0);
+        col[2].set(0, 0, 1);
+    }
     void renormalize() {
         // Gram-Schmidt re-orthonormalize the 3 columns (game builds a
         // rotation out of side/up/forward vectors that may not be
         // perfectly orthonormal after cross products).
-        btVector3 c0 = getColumnRaw(0), c1 = getColumnRaw(1);
+        btVector3 c0 = col[0].v;
+        btVector3 c2raw = col[2].v;
         c0.normalize();
-        btVector3 c2raw = getColumnRaw(2);
-        c1 = c2raw.cross(c0); // recompute middle to be orthogonal-ish; keeps handedness stable
-        if (c1.length2() > 1e-12f) c1.normalize(); else c1 = getColumnRaw(1).normalized();
+        btVector3 c1 = c2raw.cross(c0); // recompute middle to be orthogonal-ish; keeps handedness stable
+        if (c1.length2() > 1e-12f) c1.normalize(); else c1 = col[1].v.normalized();
         btVector3 c2 = c0.cross(c1);
-        setColumn(0, c0); setColumn(1, c1); setColumn(2, c2);
+        col[0].v = c0; col[1].v = c1; col[2].v = c2;
     }
 
-    btVector3 getColumnRaw(int i) const { return btVector3(m[0][i], m[1][i], m[2][i]); }
-    void setColumn(int i, const btVector3& c) { m[0][i] = c.x(); m[1][i] = c.y(); m[2][i] = c.z(); }
+    // Genuine reference into this object's own storage -- see the class
+    // comment above for why that matters.
+    hkVector4& getColumn(int i) { return col[i]; }
+    const hkVector4& getColumn(int i) const { return col[i]; }
 
-    // The game does `hkVector4& oldForward = rbRotation.getColumn(0);` and
-    // `newOrientation.getColumn(0) = mSide;` -- i.e. it wants an assignable
-    // reference. We fake that by caching a hkVector4 per column index.
-    hkVector4& getColumn(int i) {
-        cached[i] = hkVector4(getColumnRaw(i));
-        return cached[i];
+    // Scratch conversion helper, not storage -- used only by the
+    // hkQuaternion<->hkRotation conversions below.
+    btMatrix3x3 toBullet() const {
+        return btMatrix3x3(
+            col[0].v.x(), col[1].v.x(), col[2].v.x(),
+            col[0].v.y(), col[1].v.y(), col[2].v.y(),
+            col[0].v.z(), col[1].v.z(), col[2].v.z());
     }
-private:
-    hkVector4 cached[3];
-public:
-    void commitColumn(int i) { setColumn(i, cached[i].v); }
 };
 
-inline hkQuaternion::hkQuaternion(const hkRotation& r) { r.m.getRotation(q); }
-inline void hkQuaternion::set(const hkRotation& r) { r.m.getRotation(q); }
+inline hkQuaternion::hkQuaternion(const hkRotation& r) { r.toBullet().getRotation(q); }
+inline void hkQuaternion::set(const hkRotation& r) { r.toBullet().getRotation(q); }
 
 class hkTransform {
 public:

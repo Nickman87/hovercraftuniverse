@@ -786,6 +786,24 @@ target_link_libraries(hu_coreengine PUBLIC
     Boost::thread
 )
 
+# --- hu_zoidcom_roundtrip_test ----------------------------------------------
+# Standalone verification tool (NOT part of the shipped game/exe): drives
+# BasicEntityEvent through a real ZCom_BitStream via the exact
+# NetworkEvent<>::serialize()/ControllerEventParser::parse() path
+# Entity.cpp/HovercraftController.cpp use every physics step, for all 32
+# forward/backward/left/right/reset flag combinations. See
+# compat/zoidcom/tools/roundtrip_test.cpp's own header comment for why this
+# was written (bug report: inverted forward/backward, dead steering).
+add_executable(hu_zoidcom_roundtrip_test
+    ${CMAKE_SOURCE_DIR}/../compat/zoidcom/tools/roundtrip_test.cpp
+)
+target_link_libraries(hu_zoidcom_roundtrip_test PRIVATE
+    hu_coreengine
+)
+target_compile_definitions(hu_zoidcom_roundtrip_test PRIVATE
+    _HAS_STD_BYTE=0
+)
+
 # --- hu_sound --------------------------------------------------------------
 # Ported (in place, not copied) from HovercraftUniverse/Sound/*.cpp/.h -- the
 # faithful VC9 conversion tracked by HovercraftUniverse/Sound/CMakeLists.txt
