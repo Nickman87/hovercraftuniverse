@@ -215,7 +215,25 @@ Two clients + dedicated server, one machine (31/07/2026):
   proxy replication of a human's name works in both directions.
 - Both reach `RACING` in the same second. Zero errors in any log.
 
-Two machines over a real LAN, host running server-only (31/07/2026):
+**Two humans on two machines over a real LAN (31/07/2026)** -- the real thing:
+
+- Both clients connected, reached the lobby, and raced. **Both finished**,
+  in order, with every checkpoint accepted:
+  `20 ... 20 finished!` then `21 ... 21 finished!` in `server.stdout.log`.
+- Zero errors in any log on either machine.
+
+So client-to-client replication, the lobby fixes in b3ec550, the chat fix, and
+the connection-accept ordering fix all work over a real network with real
+latency -- which is what the in-process transport they were diagnosed against
+could never have shown.
+
+One harness defect this run exposed: both players appeared as `Player1`,
+because `New-ClientConfig` named clients by loop index and each machine
+independently runs client #1. That looks exactly like broken name replication
+and is not -- it is two players who genuinely have the same name. Generated
+names are now prefixed with `$env:COMPUTERNAME` (override with `-PlayerName`).
+
+Earlier, two machines with the host running server-only (so: one human + a bot):
 
 - Client on the second machine connected to `192.168.0.182:2375`, reached the
   lobby, saw the host-side player named correctly, **chat worked**, and the

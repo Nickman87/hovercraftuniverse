@@ -48,6 +48,12 @@
     [Player] PlayerName, so the lobby can tell them apart and their logs do
     not overwrite each other.
 
+.PARAMETER PlayerName
+    Base name for the generated client configs. Defaults to $env:COMPUTERNAME,
+    so two machines never produce the same lobby name -- with -Clients > 1 a
+    -<n> suffix is appended per client. Override only if you want something
+    shorter or more readable in the lobby.
+
 .PARAMETER NoStart
     multiplayer mode: connect the clients but do NOT start the race, so the
     session sits in the lobby. Use this to watch lobby-phase behaviour (player
@@ -103,6 +109,7 @@ param(
     [int]    $Seconds = 45,
     [int]    $Clients = 2,
     [string] $HostAddress = '',
+    [string] $PlayerName = '',
     [switch] $NoStart,
     [switch] $Collect,
     [switch] $Debugger
@@ -186,11 +193,20 @@ function New-ClientConfig([int] $n) {
     $master = Join-Path $RunDir 'HovercraftUniverse.ini'
     if (-not (Test-Path $master)) { Fail "$master not found -- cannot derive a client config." }
 
+    # The player name must be unique across MACHINES, not just across the
+    # clients on one machine. Indexing by $n alone gave every machine's first
+    # client the name "Player1", so a two-machine race had both humans called
+    # Player1 in both lobbies -- which looks exactly like broken name
+    # replication and is not. Prefix with the computer name unless the caller
+    # overrides it.
+    $who = if ($PlayerName) { $PlayerName } else { $env:COMPUTERNAME }
+    $label = if ($Clients -gt 1) { "$who-$n" } else { $who }
+
     $name = "Client$n.ini"
     $dest = Join-Path $RunDir $name
     $out  = foreach ($line in (Get-Content $master)) {
         if     ($line -match '^\s*LogFile\s*=')    { "LogFile=Client$n.log" }
-        elseif ($line -match '^\s*PlayerName\s*=') { "PlayerName=Player$n" }
+        elseif ($line -match '^\s*PlayerName\s*=') { "PlayerName=$label" }
         else                                       { $line }
     }
     Set-Content -Path $dest -Value $out -Encoding utf8
