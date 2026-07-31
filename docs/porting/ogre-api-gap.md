@@ -161,8 +161,10 @@ reverted; the permanent fix is `LegacyMeshLodListener`
 (`HovercraftUniverse/CoreEngine/LegacyMeshLodListener.h/.cpp`), installed
 from `Application::createRoot()` next to
 `DuplicateMaterialScriptCompilerListener::install()`. It implements
-`Ogre::MeshSerializerListener::processMeshCompleted()` and repairs the LOD
-data on any mesh with more than one LOD level, as each mesh finishes loading.
+`Ogre::MeshSerializerListener::processMeshCompleted()` and acts on any mesh
+with more than one LOD level as that mesh finishes loading. (What it *does*
+there changed once the cause was fully understood -- see "...but that was only
+half of it" below.)
 
 **Root cause: `value` is never derived from `userValue` for legacy-format
 meshes.** An `Ogre::MeshLodUsage` carries both. `userValue` is the switch
@@ -196,12 +198,46 @@ After:  [0: value=0 userValue=0] [1: value=40000 userValue=200] [2: value=160000
 40000 = 200^2 and 160000 = 400^2, confirming both the squaring convention and
 that LOD now switches at the authored distances.
 
-This **keeps the authored LOD levels working** rather than discarding them,
-and touches nothing on disk -- the assets under `HovercraftUniverse/data/`
-stay byte-for-byte as recovered, which is a project deliverable.
+### ...but that was only half of it
 
-*(An earlier version of this listener called `mesh->removeLodLevels()`
-instead, as a workaround, before the `[LODDIAG]` numbers above identified the
-actual cause. Stripping LOD also cures the symptom -- these meshes are small
-by modern-GPU standards -- but there is no reason to throw the levels away
-now that the data can simply be repaired.)*
+Re-deriving `value` was reported as the fix. **It was not** -- it repaired the
+switch distances, which were genuinely broken, but it only moved the artifact
+out of view. The artifact came back on the next play session.
+
+The tell is *where* it was looked for. `Asteroid01`/`Asteroid02` are where the
+player spends nearly all their time, comfortably inside the 200-unit LOD 0
+band, so those meshes' reduced levels are almost never on screen. `Planet01` --
+the third asteroid, at `(-1278, 281, -454)`, approached from 700+ units away --
+renders at **LOD 2 for most of the approach**, and still showed the artifact,
+with exactly the distance-dependent signature the original report described:
+fixed in shape, resolving as the camera closes and crosses into LOD 1 then 0.
+
+So Ogre 14's legacy read path gets **two** things wrong about a
+`MeshSerializer_v1.41` mesh: the `value`/`userValue` derivation above, *and*
+the reduced levels' geometry itself.
+
+Confirmed by a decisive experiment: `LegacyMeshLodListener` was switched to
+`Mesh::removeLodLevels()`, discarding the reduced levels entirely. That
+removes the artifact on `Planet01` completely (human-verified, 31/07/2026).
+Correct switch distances into broken geometry is still broken geometry.
+
+**The permanent fix is therefore `Mesh::removeLodLevels()`** -- discard the
+levels rather than trust them. These meshes are small by modern-GPU standards,
+so always rendering full detail costs essentially nothing. It touches nothing
+on disk: the assets under `HovercraftUniverse/data/` stay byte-for-byte as
+recovered (a project deliverable) and the authored LOD data is simply ignored
+at load time.
+
+*(If the LOD levels are ever actually wanted back -- they buy nothing on
+current hardware -- the way to do it is to regenerate them from LOD 0 with
+Ogre 14's own `MeshLodGenerator` and re-apply the authored `userValue`
+distances, rather than trusting what the legacy deserializer produced. The
+`setLodStrategy()` call is preserved, commented out, next to the
+`removeLodLevels()` call for whoever picks that up.)*
+
+**Process note.** The first fix was reported as verified on the strength of a
+mechanism that explained the data (`value=0` really was wrong) plus a check in
+the place the symptom was first reported. Neither established that the symptom
+was gone everywhere it occurred. A distance-dependent artifact needs to be
+checked at the *worst-case distance in the level*, which here was a different
+object entirely.

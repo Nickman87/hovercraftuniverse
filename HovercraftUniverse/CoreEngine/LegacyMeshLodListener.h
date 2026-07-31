@@ -34,17 +34,35 @@ namespace HovUni {
  * that called Mesh::removeLodLevels() from the render loop made the
  * artifacts disappear within a second, verified by a human tester.
  *
- * This is a deliberate port decision, not a root-cause fix: these meshes
- * are small by the standards of a modern GPU, so discarding their LOD
- * levels and always rendering full detail costs essentially nothing, and
- * HovercraftUniverse/data/ must not be rewritten to fix the LOD data on
- * disk (the assets are recovered byte-for-byte and their integrity is a
- * project deliverable). Whether the LOD *data* itself is wrong, or Ogre 14
- * is misinterpreting old-format LOD distance values (e.g. reading them
- * under the wrong squared-vs-plain-distance convention and switching to a
- * heavily decimated level far too early) is an open question -- see the
- * [LODDIAG] log lines this listener emits and the discussion in
- * docs/porting/ogre-api-gap.md.
+ * Ogre 14's legacy read path gets two separate things wrong about these
+ * meshes, and only the first was understood at first:
+ *
+ *   1. MeshLodUsage::value is left at 0 on every level while userValue
+ *      holds the correctly authored switch distance (measured: userValue =
+ *      0 / 200 / 400, value = 0 / 0 / 0 on every LOD-bearing mesh in
+ *      SimpleTrack2). 'value' is what the LOD strategy compares against the
+ *      camera each frame, so level selection was meaningless. The missing
+ *      step is LodStrategy::transformUserValue().
+ *
+ *   2. The reduced levels' geometry itself is wrong.
+ *
+ * Re-deriving value from userValue via Mesh::setLodStrategy() fixed (1) and
+ * appeared to fix the artifact. It did not -- it only moved it out of view.
+ * The player spends nearly all their time inside Asteroid01/02's 200-unit
+ * LOD 0 band, so those meshes' reduced levels are almost never displayed.
+ * Planet01 -- the third asteroid, at (-1278, 281, -454), approached from
+ * 700+ units away -- renders at LOD 2 for most of the approach, and still
+ * showed the artifact with exactly the distance-dependent signature (2)
+ * predicts. Discarding the reduced levels removes it there completely.
+ *
+ * So this discards the broken levels rather than trusting them: these
+ * meshes are small by the standards of a modern GPU, so always rendering
+ * full detail costs essentially nothing, and HovercraftUniverse/data/ must
+ * not be rewritten to fix the LOD data on disk (the assets are recovered
+ * byte-for-byte and their integrity is a project deliverable). If the LOD
+ * levels are ever actually wanted back, regenerate them from LOD 0 with
+ * Ogre 14's own MeshLodGenerator and re-apply the authored userValue
+ * distances. See docs/porting/ogre-api-gap.md.
  *
  * Ogre 14 exposes exactly the hook needed: MeshSerializer::importMesh()
  * calls MeshSerializerListener::processMeshCompleted(Mesh*) once a mesh's
