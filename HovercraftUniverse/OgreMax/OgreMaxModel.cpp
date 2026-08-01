@@ -20,6 +20,7 @@
 #include "OgreMaxScene.hpp"
 #include <OgreSubEntity.h>
 #include <OgreBillboard.h>
+#include <OgreKeyFrame.h>
 
 using namespace Ogre;
 using namespace OgreMax;
@@ -960,14 +961,28 @@ void OgreMaxModel::CreateLight
     light->setSpotlightOuterAngle(Radian(lightParams->spotlightOuterAngle));
     light->setSpotlightFalloff(lightParams->spotlightFalloff);
     light->setAttenuation(lightParams->attenuationRange, lightParams->attenuationConstant, lightParams->attenuationLinear, lightParams->attenuationQuadric);
-    light->setPosition(lightParams->position);
-    light->setDirection(lightParams->direction);
+
+    //TODO(modernize): Ogre::Light::setPosition()/setDirection() require
+    //OGRE_NODELESS_POSITIONING, not enabled in this build (see matching note
+    //in OgreMaxScene::LoadLight()). If this light isn't being attached to an
+    //existing node or entity bone, give it a dedicated SceneNode to carry its
+    //position/direction instead; otherwise the attached node/bone provides it.
+    SceneNode* standaloneNode = 0;
+    if (owner.node == 0 && owner.entity == 0)
+    {
+        standaloneNode = sceneManager->getRootSceneNode()->createChildSceneNode();
+        standaloneNode->setPosition(lightParams->position);
+        standaloneNode->setDirection(lightParams->direction, Node::TS_WORLD);
+    }
 
     //Set extra data owner object
     objectExtraData->object = light;
 
     //Attach light to the owner
-    owner.Attach(light);
+    if (standaloneNode != 0)
+        standaloneNode->attachObject(light);
+    else
+        owner.Attach(light);
 
     //Process the extra data
     HandleNewObjectExtraData(callback, objectExtraData);
@@ -999,15 +1014,27 @@ void OgreMaxModel::CreateCamera
     camera->setProjectionType(cameraParams->projectionType);
     camera->setNearClipDistance(cameraParams->nearClip);
     camera->setFarClipDistance(cameraParams->farClip);
-    camera->setPosition(cameraParams->position);
-    camera->setOrientation(cameraParams->orientation);
-    camera->setDirection(cameraParams->direction);
+
+    //TODO(modernize): see the matching note in CreateLight() above --
+    //Ogre::Camera::setPosition()/setOrientation()/setDirection() require
+    //OGRE_NODELESS_POSITIONING, not enabled in this build.
+    SceneNode* standaloneNode = 0;
+    if (owner.node == 0 && owner.entity == 0)
+    {
+        standaloneNode = sceneManager->getRootSceneNode()->createChildSceneNode();
+        standaloneNode->setPosition(cameraParams->position);
+        standaloneNode->setOrientation(cameraParams->orientation);
+        standaloneNode->setDirection(cameraParams->direction, Node::TS_WORLD);
+    }
 
     //Set extra data owner object
     objectExtraData->object = camera;
 
     //Attach camera to the owner
-    owner.Attach(camera);
+    if (standaloneNode != 0)
+        standaloneNode->attachObject(camera);
+    else
+        owner.Attach(camera);
 
     //Process the extra data
     HandleNewObjectExtraData(callback, objectExtraData);

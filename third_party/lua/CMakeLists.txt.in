@@ -1,0 +1,28 @@
+# CMakeLists.txt for Lua 5.1.5, written by us (Lua ships no build system of
+# its own). This file is copied into the root of the fetched Lua source tree
+# by third_party/CMakeLists.txt's FetchContent PATCH_COMMAND, so paths below
+# are relative to the top of the lua-5.1.5 tarball (which contains src/, doc/,
+# etc.)
+cmake_minimum_required(VERSION 3.15)
+project(hu_lua C)
+
+file(GLOB HU_LUA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+
+# lua.c and luac.c are the `lua` interpreter and `luac` compiler
+# command-line executables' main()s, not part of the library.
+list(REMOVE_ITEM HU_LUA_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/lua.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/luac.c")
+
+add_library(hu_lua STATIC ${HU_LUA_SOURCES})
+
+target_include_directories(hu_lua PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+# Static build: LUA_BUILD_AS_DLL is intentionally left undefined/OFF.
+if(WIN32)
+    target_compile_definitions(hu_lua PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+set_target_properties(hu_lua PROPERTIES
+    LINKER_LANGUAGE C
+    FOLDER "third_party")

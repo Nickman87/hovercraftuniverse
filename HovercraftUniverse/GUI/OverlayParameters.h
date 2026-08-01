@@ -70,9 +70,18 @@ namespace HovUni {
 		: mName(name), mFilename(filename), mPosition(position), mResolution(resolution), mZOrder(zOrder) {
 	}
 
+	// Pre-existing bug fix (not Ogre/modernization-related, see
+	// docs/porting/hikari-gui.md): as shipped, this function referenced an
+	// undeclared identifier `mtype` (a typo of the class's own `mType`
+	// member typedef), was missing the `<T>` template argument on its
+	// out-of-class qualification, and never returned anything -- it could
+	// not have compiled or worked. Confirmed unused anywhere in
+	// HovercraftUniverse/** (grep for getInstancedOverlay/OverlayParameters<
+	// finds only this declaration), so this was dead, broken template code.
+	// Fixed to do what its name/signature/parameter list obviously intend.
 	template <typename T>
-	boost::shared_ptr<typename OverlayParameters::mType> OverlayParameters<T>::getInstancedOverlay() {
-		new mtype(mName, mFilename, mResolution->getWidth(), mResolution->getHeight(), mPosition, mZOrder);
+	boost::shared_ptr<typename OverlayParameters<T>::mType> OverlayParameters<T>::getInstancedOverlay() {
+		return boost::shared_ptr<mType>(new T(mName, mFilename, mResolution->getWidth(), mResolution->getHeight(), mPosition, mZOrder));
 	}
 }
 

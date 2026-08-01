@@ -136,9 +136,18 @@ public:
 	 */
 	Ogre::Camera * getCamera() { return mCamera; }
 
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Ogre::Camera's
+	// nodeless positioning methods (setPosition/setDirection/lookAt/
+	// setFixedYawAxis/pitch/yaw/roll/getOrientation/getPosition) only exist
+	// when Ogre itself is built with OGRE_NODELESS_POSITIONING, which this
+	// tree's vcpkg `ogre` port is not -- the supported replacement is to
+	// operate on the camera's parent SceneNode instead (mActiveViewpointNode
+	// here, which RaceCamera::reinitialize/keyPressed always keeps
+	// attach()ed to mCamera). See the equivalent fix throughout
+	// RaceCamera.cpp.
 	void setPosition(const Ogre::Vector3& position, const Ogre::Vector3& direction) {
-		mCamera->setPosition(position);
-		mCamera->setDirection(direction);
+		mActiveViewpointNode->setPosition(position);
+		mActiveViewpointNode->setDirection(direction);
 	}
 
 };

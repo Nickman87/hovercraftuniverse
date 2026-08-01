@@ -17,6 +17,7 @@
 //Includes---------------------------------------------------------------------
 #include "Version.hpp"
 #include <OgreStringConverter.h>
+#include <sstream>
 
 using namespace Ogre;
 using namespace OgreMax;
@@ -80,7 +81,9 @@ int Version::GetPatch() const
 
 void Version::ToString(String& text) const
 {
-    StringUtil::StrStreamType versionText;
+    //TODO(modernize): Ogre::StringUtil::StrStreamType is deprecated/incomplete
+    //in modern Ogre; use std::ostringstream directly instead.
+    std::ostringstream versionText;
 
     //Find the last non-zero component
     int lastNonzeroComponent = -1;

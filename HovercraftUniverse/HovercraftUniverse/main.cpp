@@ -5,6 +5,10 @@
 #include "Console.h"
 #include <OgreString.h>
 #include "Exception.h"
+// Modern-build fix (docs/porting/hikari-gui.md): ZoidCom's declaration is
+// needed directly here (previously only ever compiled transitively via
+// some other header in the VC9 project's precompiled-header chain).
+#include <zoidcom/zoidcom.h>
 
 void process_zoidcom_log(const char *_log) {
 	Ogre::LogManager::getSingleton().getDefaultLog()->stream() << _log;
@@ -26,10 +30,33 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 	bool server = false;
 	unsigned int port = 2375;
 	Ogre::String host = "localhost";
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autoconnect lets a two-process test harness connect a client to an
+	// already-running dedicated server with no GUI interaction. Without this
+	// flag on the command line, behaviour is unchanged.
+	bool autoConnect = false;
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autostart implies --autoconnect and additionally starts the race
+	// (as if the admin had clicked "Start") once the client reaches the
+	// lobby and is recognised as admin. Without this flag, behaviour is
+	// unchanged.
+	bool autoStart = false;
+	// Test affordance (revival, task #20 -- multiplayer): --config=<file>
+	// overrides the client's config INI, which was hardcoded to
+	// "HovercraftUniverse.ini". Two clients on one machine otherwise share a
+	// config, which means they share [Ogre] LogFile (so their Ogre logs
+	// overwrite each other, making a two-client run unreadable) and share
+	// [Player] PlayerName (so both appear in the lobby as the same person,
+	// making it impossible to tell whose entry is whose). Without this flag
+	// on the command line, behaviour is unchanged.
+	Ogre::String configINI = "HovercraftUniverse.ini";
 	//parse all commandline parameters (seperated by spaces)
 	Ogre::String commandline (strCmdLine);
-	Ogre::vector<Ogre::String>::type result = Ogre::StringUtil::split(commandline, " ");
-	for (Ogre::vector<Ogre::String>::type::iterator i = result.begin(); i != result.end(); i++ ) {
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): the
+	// Ogre::vector<T>::type STLAllocator-wrapper idiom is gone; modern Ogre
+	// (and StringUtil::split's return type) just uses std::vector<T>.
+	std::vector<Ogre::String> result = Ogre::StringUtil::split(commandline, " ");
+	for (std::vector<Ogre::String>::iterator i = result.begin(); i != result.end(); i++ ) {
 		if ((*i) == "--server") {
 			server = true;
 		} else if (Ogre::StringUtil::startsWith(*i,"--host=")) {
@@ -42,8 +69,15 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 				host = connectionstring.substr(0,pos);
 				port = Ogre::StringConverter::parseInt(connectionstring.substr(pos+1));
 			}
+		} else if (Ogre::StringUtil::startsWith(*i, "--config=")) {
+			configINI = (*i).substr(9);
 		} else if ((*i) == "--console") {
 			console = true;
+		} else if ((*i) == "--autoconnect") {
+			autoConnect = true;
+		} else if ((*i) == "--autostart") {
+			autoConnect = true;
+			autoStart = true;
 		}
 	}
 
@@ -69,11 +103,11 @@ INT WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR strCmdLine, INT) {
 			HovUni::Console::createConsole("HovercraftUniverse Debug Console");
 		}
 
-		HovUni::HUApplication app("HovercraftUniverse.ini");
+		HovUni::HUApplication app(configINI.c_str());
 		
 		try {
 			app.init();
-			app.go(host,port);
+			app.go(host,port,autoConnect,autoStart);
 		} catch (Ogre::Exception & e) {
 			MessageBox(NULL, e.getFullDescription().c_str(), "An exception has occurred!", MB_OK | MB_ICONERROR | MB_TASKMODAL);
 		} catch (HovUni::Exception e2) {

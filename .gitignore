@@ -22,3 +22,31 @@ ipch/
 
 # Jekyll build output
 docs/_site/
+
+# Local mirror of the Google Code Archive packages (see README, Phase 0) —
+# ~1.2 GB of installers/SDKs, to be published as a GitHub Release, not committed.
+archive-mirror/
+
+# Dependency SDKs and runtime binaries, reconstructed from archive-mirror
+# by scripts/bootstrap-dependencies.ps1 (see README, Phase 1/2) — never committed.
+HovercraftUniverse/dependencies/
+HovercraftUniverse/bin/debug/*.dll
+HovercraftUniverse/bin/release/*.dll
+HovercraftUniverse/data/Flash.ocx
+HovercraftUniverse/data/plugins_debug/
+HovercraftUniverse/data/plugins_release/
+
+# Ready-to-run v1.0 game (unpacked from the archived installer, see RUNNING.md)
+local-game/
+
+# Local toolchain installers and sandbox build outputs (the automation itself is committed)
+toolchain/*.iso
+toolchain/*.exe
+toolchain/vs2008-express/
+toolchain/dxsdk/
+toolchain/sandbox/artifacts/
+toolchain/sandbox/*.log
+
+# Packaged runtime for a second test machine (scripts/package-for-second-machine.ps1).
+# ~225 MB of build output. It belongs in the Synology sync, not in the repo.
+dist/

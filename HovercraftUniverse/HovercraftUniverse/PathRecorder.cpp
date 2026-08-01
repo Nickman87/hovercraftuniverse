@@ -3,6 +3,8 @@
 
 #include "Hovercraft.h"
 #include "boost/date_time/gregorian/gregorian.hpp"
+#include <boost/thread/thread.hpp>
+#include <boost/chrono.hpp>
 #include <fstream>
 
 namespace HovUni {
@@ -53,11 +55,11 @@ namespace HovUni {
 			Ogre::Vector3 pos = mHover->getPosition();
 			str << pos[0] << " " << pos[1] << " " << pos[2] << " 1" << std::endl; 
 
-			// Sleep
-			boost::xtime xt;
-			boost::xtime_get(&xt, boost::TIME_UTC);
-			xt.nsec += 1000000;
-			boost::thread::sleep(xt);
+			// Sleep. boost::xtime/boost::thread::sleep(xtime) were removed
+			// from modern Boost (deprecated years ago in favor of
+			// boost::this_thread::sleep_for); this preserves the original
+			// 1ms sleep using the modern chrono-based API.
+			boost::this_thread::sleep_for(boost::chrono::milliseconds(1));
 		}
 
 		str.flush();

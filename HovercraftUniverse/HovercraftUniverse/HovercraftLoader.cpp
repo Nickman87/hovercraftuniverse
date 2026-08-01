@@ -5,6 +5,8 @@
 #include "RepresentationManager.h"
 #include "ProgressMonitor.h"
 #include <OgreSceneManager.h>
+#include <OgreAnimationTrack.h>
+#include <OgreKeyFrame.h>
 
 namespace HovUni {
 

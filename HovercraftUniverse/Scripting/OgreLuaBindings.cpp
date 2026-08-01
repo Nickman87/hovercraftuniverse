@@ -26,6 +26,25 @@ namespace HovUni {
 	#define LUA_CONST(class, name) table[#name] = class::name
 	#define LUA_CONST_END }
 
+	// Vector3::dotProduct()/absDotProduct() are declared to take a parameter
+	// typed as the templated VectorBase<3,float>/Vector<3,float> base in
+	// modern Ogre (Vector3 is now `Vector<3,Real>`, which derives from
+	// VectorBase<3,Real> via a CRTP template -- see OgreVector.h), instead
+	// of a concrete Vector3 like in Ogre 1.7. luabind only knows about the
+	// concrete Vector3 type registered below, so a Lua-side Vector3 can
+	// never match a base-class parameter and every call throws "No
+	// matching overload found". These free-function wrappers forward to
+	// the real methods through a concrete Vector3 parameter, preserving
+	// the exact Lua-visible signature (same idiom as the Camera_setPosition/
+	// Camera_lookAt wrappers further down in this file).
+	static Real Vector3_dotProduct(const Vector3* self, const Vector3& vec) {
+		return self->dotProduct(vec);
+	}
+
+	static Real Vector3_absDotProduct(const Vector3* self, const Vector3& vec) {
+		return self->absDotProduct(vec);
+	}
+
 	void OgreLuaBindings::bindVector3()	{
 		lua_State* L = mLuaState;
 		module(L)
@@ -38,11 +57,11 @@ namespace HovUni {
 			.def(constructor<>())
 			.def(constructor<Vector3&>())
 			.def(constructor<Real, Real, Real>())
-			.def("absDotProduct", &Vector3::absDotProduct)
+			.def("absDotProduct", &Vector3_absDotProduct)
 			.def("crossProduct", &Vector3::crossProduct)
 			.def("directionEquals", &Vector3::directionEquals)
 			.def("distance", &Vector3::distance)
-			.def("dotProduct", &Vector3::dotProduct)
+			.def("dotProduct", &Vector3_dotProduct)
 			.def("getRotationTo", &Vector3::getRotationTo)
 			.def("isZeroLength", &Vector3::isZeroLength)
 			.def("length", &Vector3::length)
@@ -146,15 +165,44 @@ namespace HovUni {
 		];
 	}
 
+	// Camera::setPosition()/lookAt() (and friends) are no longer members of
+	// Ogre::Camera in modern Ogre -- they only exist when the engine is
+	// built with the (off by default, deprecated) OGRE_NODELESS_POSITIONING
+	// option (see OgreCamera.h). The supported modern idiom is to position
+	// the camera's parent SceneNode instead (docs/porting/ogre-api-gap.md).
+	// These free functions preserve the exact Lua-visible API (setPosition/
+	// lookAt taking a Vector3 or 3 Reals) by forwarding to the camera's
+	// parent scene node; luabind supports binding free functions taking the
+	// bound type as their first parameter as if they were member functions.
+	static void Camera_setPosition(Camera* camera, const Vector3& pos) {
+		if (SceneNode* node = camera->getParentSceneNode()) {
+			node->setPosition(pos);
+		}
+	}
+
+	static void Camera_setPositionXYZ(Camera* camera, Real x, Real y, Real z) {
+		Camera_setPosition(camera, Vector3(x, y, z));
+	}
+
+	static void Camera_lookAt(Camera* camera, const Vector3& targetPoint) {
+		if (SceneNode* node = camera->getParentSceneNode()) {
+			node->lookAt(targetPoint, Node::TS_WORLD);
+		}
+	}
+
+	static void Camera_lookAtXYZ(Camera* camera, Real x, Real y, Real z) {
+		Camera_lookAt(camera, Vector3(x, y, z));
+	}
+
 	void OgreLuaBindings::bindCamera() {
 		lua_State* L = mLuaState;
 		module(L)
 		[
 			class_<Camera>("Camera")
-			.def("setPosition", (void(Camera::*)(const Vector3&))&Camera::setPosition)
-			.def("setPosition", (void(Camera::*)(Real,Real,Real))&Camera::setPosition)
-			.def("lookAt", (void(Camera::*)(const Vector3&))&Camera::lookAt)
-			.def("lookAt", (void(Camera::*)(Real,Real,Real))&Camera::lookAt)
+			.def("setPosition", &Camera_setPosition)
+			.def("setPosition", &Camera_setPositionXYZ)
+			.def("lookAt", &Camera_lookAt)
+			.def("lookAt", &Camera_lookAtXYZ)
 			.def("setNearClipDistance", &Camera::setNearClipDistance)
 			.def("setFarClipDistance", &Camera::setFarClipDistance)
 		];

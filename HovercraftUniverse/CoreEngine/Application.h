@@ -2,6 +2,24 @@
 #define APPLICATION_H_
 
 #include <OgreRoot.h>
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Overlay was split out of
+// core Ogre into a separate component; Root no longer auto-creates the
+// OverlayManager/FontManager, an explicit Ogre::OverlaySystem must be
+// constructed and registered as a RenderQueueListener with each
+// SceneManager -- see createRoot()/setupScene() in Application.cpp. Without
+// this, Ogre::OverlayManager::getSingletonPtr() (called by
+// MouseVisualisation's ctor and every GUI overlay) returns null and the
+// first overlay created access-violates.
+#include <OgreOverlaySystem.h>
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+// DuplicateMaterialScriptCompilerListener.h comment -- installs a
+// ScriptCompilerListener that restores Ogre 1.7's first-definition-wins
+// handling of the shipped .material scripts' duplicate material names.
+#include "DuplicateMaterialScriptCompilerListener.h"
+// Ogre 14 API fix / port workaround (docs/porting/ogre-api-gap.md): see the
+// LegacyMeshLodListener.h comment -- strips LOD levels from legacy-format
+// meshes to work around a distance-dependent rendering artifact.
+#include "LegacyMeshLodListener.h"
 #include "EntityManager.h"
 #include "InputManager.h"
 #include "GameStateManager.h"
@@ -34,6 +52,11 @@ protected:
 
 	/** The root Ogre object */
 	Ogre::Root * mOgreRoot;
+
+	/** The Overlay component's bootstrap object (see the OgreOverlaySystem.h
+	 * include comment above) -- created in createRoot(), registered with
+	 * the scene manager in setupScene(). */
+	Ogre::OverlaySystem * mOverlaySystem;
 
 	/** The game state manager */
 	GameStateManager* mGameStateMgr;
@@ -74,7 +97,30 @@ protected:
 	std::string mEntitiesPath;
 	/** The path to the entities file */
 	std::string mEntitiesFile;
-	
+
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): go()
+	// used to receive host/port and silently discard them (see the
+	// commented-out body of createClient() below). A two-process test
+	// harness needs a way to auto-connect a client to an already-running
+	// dedicated server with no GUI interaction, so go() now stashes its
+	// arguments here; MainMenuState reads them back on its first
+	// frameStarted() tick to (optionally) drive the real onConnect() path
+	// itself. Static, like mConfig above, since Application has no
+	// singleton accessor but game states outside this class need to read
+	// them. Not original behaviour -- with no --autoconnect flag,
+	// msAutoConnect stays false and nothing changes.
+	static Ogre::String msAutoConnectHost;
+	static unsigned int msAutoConnectPort;
+	static bool msAutoConnect;
+
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	// --autostart implies --autoconnect and additionally has LobbyState fire
+	// mLobby->start() itself once the client is recognised as admin, so a
+	// test harness can drive a race past the lobby with no GUI interaction.
+	// Not original behaviour -- with no --autostart flag, msAutoStart stays
+	// false and nothing changes.
+	static bool msAutoStart;
+
 public:
 
 	/**
@@ -109,8 +155,27 @@ public:
 	 *
 	 * @param host the hostname to connect to
 	 * @param port the port to connect on
+	 * @param autoConnect test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	 *        when true, the menu state connects to host:port itself on its
+	 *        first tick instead of waiting for a GUI click. Defaults to
+	 *        false, i.e. unchanged original behaviour.
+	 * @param autoStart test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+	 *        when true (implies autoConnect), LobbyState fires
+	 *        mLobby->start() itself once we're recognised as admin in the
+	 *        lobby. Defaults to false, i.e. unchanged original behaviour.
 	 */
-	void go(const Ogre::String& host, unsigned int port);
+	void go(const Ogre::String& host, unsigned int port, bool autoConnect = false, bool autoStart = false);
+
+	/**
+	 * Test affordance (revival Phase B, docs/porting/phase-b-plan.md): read
+	 * back the host/port/autoConnect/autoStart that were passed to go(), so a
+	 * game state can drive an auto-connect/auto-start without any GUI
+	 * interaction.
+	 */
+	static const Ogre::String& getAutoConnectHost() { return msAutoConnectHost; }
+	static unsigned int getAutoConnectPort() { return msAutoConnectPort; }
+	static bool getAutoConnect() { return msAutoConnect; }
+	static bool getAutoStart() { return msAutoStart; }
 
 	/**
 	 * Creates the client.

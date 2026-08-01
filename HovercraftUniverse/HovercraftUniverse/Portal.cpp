@@ -39,7 +39,7 @@ void Portal::load(TiXmlElement * data) throw(ParseException){
 		TiXmlElement* element = dynamic_cast<TiXmlElement*>(node);
 		if(element){
 			Ogre::String value = Ogre::String(element->GetText());
-			Ogre::vector<Ogre::String>::type split = Ogre::StringUtil::split(value,",");
+			std::vector<Ogre::String> split = Ogre::StringUtil::split(value,","); // Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): Ogre::vector<T>::type -> std::vector<T>
 			
 			if(split.size() != 3)
 				 THROW(ParseException, "Start does not have 3 splits.");
@@ -56,7 +56,7 @@ void Portal::load(TiXmlElement * data) throw(ParseException){
 		TiXmlElement* element = dynamic_cast<TiXmlElement*>(node);
 		if(element){
 			Ogre::String value = Ogre::String(element->GetText());
-			Ogre::vector<Ogre::String>::type split = Ogre::StringUtil::split(value,",");
+			std::vector<Ogre::String> split = Ogre::StringUtil::split(value,","); // Ogre 14 API fix (docs/porting/ogre-api-gap.md, row 1): Ogre::vector<T>::type -> std::vector<T>
 			
 			if(split.size() != 3)
 				 THROW(ParseException, "End does not have three splits.");

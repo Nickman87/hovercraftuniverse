@@ -2,6 +2,8 @@
 #include "Havok.h"
 #include "HavokEntityType.h"
 
+#include <cmath>
+
 #include <Common/Base/Types/Color/hkColor.h>
 #include <Common/Visualize/hkDebugDisplay.h>
 
@@ -32,6 +34,17 @@
 
 
 namespace HovUni {
+
+// All gameplay-tuning constants in [Movement]/[Havok] in engine_settings.cfg were
+// authored and tuned by feel at a 30 Hz physics step rate (the original shipped
+// rate). When the physics tick rate changes (this port raises it to 60 Hz, see
+// docs/porting/timing-and-smoothing.md), per-step values must be re-derived
+// against this reference so the game *feels* the same regardless of dt:
+//  - rate-LINEAR quantities (applied once per step, e.g. a per-step turn angle)
+//    scale by (dt * HU_PHYSICS_REFERENCE_RATE).
+//  - rate-EXPONENTIAL quantities (a per-step "close X% of the remaining error"
+//    gain) scale by 1 - (1 - originalGain) ^ (dt * HU_PHYSICS_REFERENCE_RATE).
+static const hkReal HU_PHYSICS_REFERENCE_RATE = 30.0f;
 
 SimpleTest::SimpleTest( hkpWorld * world, HavokHovercraft * hover ):
 	SimpleEntityCollision(world,hover, 15, hkAabb(hkVector4(-2,-2,-2),hkVector4(2,2,2))){
@@ -76,10 +89,21 @@ std::ostream& operator<<(std::ostream& stream, const hkVector4& v) {
 
 HavokHovercraft::HavokHovercraft(hkpWorld * world, Hovercraft * entity, const hkString& filename, const hkString& entityname):
 		HavokEntity(world), mEntity(entity), mFilename(filename), mEntityName(entityname), mCharacterRigidBody(HK_NULL), mCollisionCounter(0),
-		mCharacterContext(HK_NULL),	mRotationDelta(DedicatedServer::getEngineSettings()->getValue<float>("Movement", "TurnAngle", 0.0f)),
+		mCharacterContext(HK_NULL),
+		// TurnAngle is applied once per physics step as a fixed rotation angle (see
+		// update(), ~line 260), so it is rate-LINEAR: normalize by (dt * reference
+		// rate). At the original 30 Hz reference this is a no-op (0.12 -> 0.12); at
+		// 60 Hz it halves to ~0.06, keeping the same turn rate in degrees/second.
+		mRotationDelta(DedicatedServer::getEngineSettings()->getValue<float>("Movement", "TurnAngle", 0.0f)
+			* (Havok::getSingleton().getTimeStep() * HU_PHYSICS_REFERENCE_RATE)),
 		mSpeedDamping(DedicatedServer::getEngineSettings()->getValue<float>("Movement", "Damping", 0.0f)),
-		mCharacterGravity(DedicatedServer::getEngineSettings()->getValue<float>("Havok", "CharacterGravity", 0.0f))
-		
+		mCharacterGravity(DedicatedServer::getEngineSettings()->getValue<float>("Havok", "CharacterGravity", 0.0f)),
+		// Orientation-correction gain (see update(), ~line 366) closes a fixed
+		// fraction of the remaining orientation error every step, so it is
+		// rate-EXPONENTIAL: normalize so the *per-second* correction rate stays
+		// constant regardless of dt. At the 30 Hz reference this is a no-op
+		// (0.25 -> 0.25); at 60 Hz it becomes ~0.1340.
+		mAngularGain(1.0f - powf(1.0f - 0.25f, Havok::getSingleton().getTimeStep() * HU_PHYSICS_REFERENCE_RATE))
 {
 	mUp.set(0,1,0);
 	mSide.set(0,0,1);
@@ -356,14 +380,15 @@ void HavokHovercraft::update(){
 	//set new speed
 	mEntity->setSpeed(actualSpeed);
 	
-	const hkReal gain = 0.25f;
+	// mAngularGain is the original 0.25f-per-30Hz-step gain, normalized
+	// (rate-exponential) to the actual physics step rate; see the constructor.
 	const hkQuaternion& currentOrient = mCharacterRigidBody->getRigidBody()->getRotation();
 	hkQuaternion desiredOrient;
 	desiredOrient.set(newOrientation);
 	hkVector4 angle;
 	hkVector4 angularVelocity;
 	currentOrient.estimateAngleTo(desiredOrient, angle);
-	angularVelocity.setMul4(gain / Havok::getSingleton().getTimeStep(), angle);
+	angularVelocity.setMul4(mAngularGain / Havok::getSingleton().getTimeStep(), angle);
 	mCharacterRigidBody->setAngularVelocity(angularVelocity);
 
 	mWorld->unmarkForWrite();

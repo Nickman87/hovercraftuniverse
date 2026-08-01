@@ -76,7 +76,11 @@ namespace HovUni {
 		//AABB = axis-aligned bounding box
 		const Ogre::AxisAlignedBox& bbox = m_p->getWorldBoundingBox(true);
 		Ogre::Matrix4 mat = m_c->getViewMatrix();
-		const Ogre::Vector3* corners = bbox.getAllCorners();
+		// TODO(modernize): Ogre 14's AxisAlignedBox::getAllCorners() returns
+		// Corners (std::array<Vector3, 8>) by value instead of the old
+		// const Vector3* into internal storage. std::array supports
+		// operator[], so the indexing loop below is unchanged.
+		const Ogre::AxisAlignedBox::Corners corners = bbox.getAllCorners();
 
 		float min_x = 1.0f;
 		float max_x = 0.0f;

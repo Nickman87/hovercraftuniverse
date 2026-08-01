@@ -1,13 +1,13 @@
-vertex_program asteroidVS cg
+vertex_program asteroidVS hlsl
 {
-	source asteroidVS.cg
-	profiles vs_1_1
+	source asteroidVS.hlsl
+	target vs_2_0
 	entry_point vs_main
 }
 
-fragment_program asteroidPS cg
+fragment_program asteroidPS hlsl
 {
-	source asteroidPS.cg
-	profiles ps_2_0
+	source asteroidPS.hlsl
+	target ps_2_0
 	entry_point ps_main
 }

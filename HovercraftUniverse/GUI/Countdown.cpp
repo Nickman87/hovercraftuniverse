@@ -12,7 +12,15 @@ namespace HovUni {
 		mTime = milliseconds;
 
 		try {
-			this->callFunction("start", Hikari::Args(mTime));
+			// Ogre 14 / modern-MSVC fix: Hikari::FlashValue has both an
+			// `int` and an `Ogre::Real` (float) converting constructor, so
+			// passing a bare `long` here is ambiguous under standard
+			// overload resolution (both are equally-ranked standard
+			// conversions) -- this apparently slipped through on the
+			// original VC9 toolchain but is a hard error on v143. Disambiguate
+			// explicitly; mTime is a countdown in milliseconds, always well
+			// within `int` range.
+			this->callFunction("start", Hikari::Args((int)mTime));
 		} catch (OverlayNotActivatedException) {
 			//Ignore
 		}
@@ -21,7 +29,8 @@ namespace HovUni {
 	void Countdown::resync(long milliseconds) {
 		if (mStarted) {
 			try {
-				this->callFunction("resync", Hikari::Args(milliseconds));
+				// See the comment in Countdown::start above.
+				this->callFunction("resync", Hikari::Args((int)milliseconds));
 			} catch (OverlayNotActivatedException) {
 				mTime = milliseconds;
 			}

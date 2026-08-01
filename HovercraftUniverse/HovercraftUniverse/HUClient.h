@@ -10,6 +10,13 @@
 #include <ChatListener.h>
 
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
+// Modern-build fix (docs/porting/hikari-gui.md): this header uses
+// boost::posix_time::ptime (see HUClient::timed_wait below) but never
+// actually included the header that declares it -- a genuine, pre-existing
+// gap that apparently went unnoticed because some other header in the VC9
+// project's precompiled-header chain happened to pull it in first. This
+// build has no precompiled header, so include it explicitly.
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 namespace HovUni {
 

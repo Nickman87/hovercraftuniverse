@@ -2,6 +2,7 @@
 #include "EntityManager.h"
 #include "ControllerEventParser.h"
 #include <cassert>
+#include <cmath>
 #include <OgreLogManager.h>
 #include "EntityPropertySystem.h"
 
@@ -92,10 +93,6 @@ Entity::~Entity() {
 }
 
 void Entity::init() {
-	mSpringInterpolator.setDampening(60);
-	mSpringInterpolator.setMass(60);
-	mSpringInterpolator.setStiffness(30);
-
 	mProperties = new EntityPropertyMap(this);
 
 	mLastPosition = Ogre::Vector3::ZERO;
@@ -132,26 +129,37 @@ void Entity::setController(Controller * controller) {
 }
 
 void Entity::update(float timeSince) {
-	/*
-	if (this->getCategory() == "Hovercraft") {
-		std::cout << "Position: " << mPosition << std::endl;
-		std::cout << "tmpPosition: " << mTmpPosition << std::endl;
-	}
-	*/
-
-	//if (mNode->getRole() != eZCom_RoleAuthority) {
-		//Interpolate the position manually
-		//mTmpPosition = mSpringInterpolator.updateCameraSpring(mTmpPosition, mPosition);
-	//}
+	// Render-side position update: decoupled from the physics tick rate so
+	// motion stays smooth regardless of the render frame rate (e.g. 144 Hz)
+	// versus the physics rate (60 Hz). See docs/porting/timing-and-smoothing.md.
+	//
+	// Always dead-reckon forward first using the last known velocity -- this is
+	// the predictor that keeps mTmpPosition advancing every rendered frame even
+	// between physics ticks.
+	mTmpPosition += mVelocity * timeSince;
 
 	if (mLastPosition != mPosition) {
-		mTmpPosition = mPosition;
+		// A new authoritative mPosition arrived (e.g. from the physics step, or
+		// over the network) since the last update(). The original code snapped
+		// mTmpPosition straight to it here, which is what caused visible judder
+		// at high render rates: several frames of extrapolation followed by a
+		// hard pop back onto the authoritative value every physics tick.
+		//
+		// Instead, blend towards it with a critically-damped exponential, unless
+		// the jump is too large to be a normal physics correction (a teleport,
+		// a checkpoint respawn, or a portal traversal), in which case snapping
+		// immediately is correct -- smoothing across a teleport would make the
+		// entity visibly slide across the level.
+		const Ogre::Vector3 error = mPosition - mTmpPosition;
+		if (error.squaredLength() > HU_ENTITY_TELEPORT_THRESHOLD * HU_ENTITY_TELEPORT_THRESHOLD) {
+			mTmpPosition = mPosition;
+		} else {
+			const float alpha = 1.0f - std::exp(-timeSince / HU_ENTITY_SMOOTH_TAU);
+			mTmpPosition += error * alpha;
+		}
 		mLastPosition = mPosition;
-	} else {
-		//Predict a new position
-		mTmpPosition += mVelocity * timeSince;
 	}
-	
+
 	// Process the network entity
 	NetworkEntity::processEvents(timeSince);
 

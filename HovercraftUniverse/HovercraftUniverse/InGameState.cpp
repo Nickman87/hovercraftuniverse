@@ -257,7 +257,11 @@ namespace HovUni {
 		Application::msSceneMgr->destroyAllBillboardSets();
 		Application::msSceneMgr->destroyAllEntities();
 		Application::msSceneMgr->destroyAllMovableObjects();
-		Application::msSceneMgr->destroyAllInstancedGeometry();
+		// Ogre 14 API fix (docs/porting/ogre-api-gap.md): the old
+		// InstancedGeometry system (and SceneManager::destroyAllInstancedGeometry())
+		// was removed entirely from modern Ogre, superseded by InstanceManager
+		// (a different, opt-in API this game never uses -- destroyAllMovableObjects()
+		// above already tears down every MovableObject actually created here).
 		Application::msSceneMgr->destroyAllLights();
 		Application::msSceneMgr->destroyAllEntities();
 		Application::msSceneMgr->getRootSceneNode()->removeAndDestroyAllChildren();

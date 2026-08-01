@@ -1,6 +1,7 @@
 #include "SoundManager.h"
 
 #include <OgreRoot.h>
+#include <OgreLogManager.h>
 
 namespace HovUni {
 	SoundManager* SoundManager::msSingleton = 0;

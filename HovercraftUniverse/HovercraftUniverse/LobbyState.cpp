@@ -8,7 +8,7 @@
 #include <OgreRoot.h>
 
 namespace HovUni {
-	LobbyState::LobbyState(HUClient* client) : mClient(client), mLobby(client->getLobby()), mLastGUIUpdate(0), mLastClientUpdate(0) {
+	LobbyState::LobbyState(HUClient* client) : mClient(client), mLobby(client->getLobby()), mLastGUIUpdate(0), mLastClientUpdate(0), mAutoStartTriggered(false), mAutoStartWaitLogged(false) {
 		mGUIManager = GUIManager::getSingletonPtr();
 		mLobbyGUI = new LobbyGUI(Hikari::FlashDelegate(this, &LobbyState::hovercraftChange), Hikari::FlashDelegate(this, &LobbyState::mapChange), Hikari::FlashDelegate(this, &LobbyState::onChat), Hikari::FlashDelegate(this, &LobbyState::onPressStart), Hikari::FlashDelegate(this, &LobbyState::onPressLeave), Hikari::FlashDelegate(this, &LobbyState::botsValue), Hikari::FlashDelegate(this, &LobbyState::playerMax));
 	}
@@ -88,6 +88,19 @@ namespace HovUni {
 	////////////////////////////////////////
 
 	void LobbyState::onPlayerUpdate(int id, const std::string& username, const std::string& character, const std::string& car) {
+		// Log what actually reaches the lobby GUI. The C++ -> Flash push is
+		// write-only (Hikari returns <undefined/> and the SWF cannot be
+		// queried), so without this there is no way to tell "the GUI was
+		// never told" from "the GUI was told and did not render it" -- the
+		// distinction that took the longest to establish when the lobby was
+		// showing blank names. Must be here, at the top: the delayed-user
+		// branch below returns early, and that is precisely the branch a
+		// late-arriving replicated name takes. Cheap: lobby-rate, not
+		// frame-rate.
+		Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+			<< "[LobbyState]: update user " << id << " '" << username << "' "
+			<< character << "/" << car;
+
 		//check if this user has already been announced
 		if (username != "") {
 			std::vector<unsigned int>::const_iterator it = mDelayedUsers.begin();
@@ -121,6 +134,10 @@ namespace HovUni {
 	void LobbyState::onJoin(PlayerSettings * settings) {
 		//Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream() << "[LobbyState]: onJoin was called! " << settings->getPlayerName() << " (" << settings->getID() << ")";
 		//Player has joined, add empty player to the visualisation
+		Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+			<< "[LobbyState]: join user " << settings->getID() << " '"
+			<< settings->getPlayerName() << "'"
+			<< (settings->getPlayerName() == "" ? " (name not yet replicated, deferred)" : "");
 		if (settings->getPlayerName() != "") {
 			mLobbyGUI->addUser(settings->getID(), settings->getPlayerName(), settings->getCharacter(), settings->getHovercraft());
 		} else {
@@ -185,8 +202,50 @@ namespace HovUni {
 		for (Lobby::playermap::const_iterator i = players.begin(); i != players.end(); ++i) {
 			PlayerSettings* player = (*i).second;
 			if (!player->isBot()) {
+				// Logged for the same reason as onJoin()/onPlayerUpdate():
+				// players already present when this state activates never
+				// pass through either of those, so without this they would
+				// be the one group of lobby entries with no trace at all of
+				// what the GUI was told about them.
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[LobbyState]: existing user " << player->getID() << " '"
+					<< player->getPlayerName() << "'"
+					<< (player->getPlayerName() == "" ? " (name not yet replicated)" : "");
 				mLobbyGUI->addUser(player->getID(), player->getPlayerName(), player->getCharacter(), player->getHovercraft());
 			}
+
+			// onJoin() (which normally creates this
+			// player's PlayerSettingsInterceptor) is dispatched by
+			// Lobby::addPlayer() as soon as the dynamic PlayerSettings node
+			// is created -- for our own node, that happens on HUClient's
+			// background connect thread (ClientConnectThread), synchronously
+			// within its very first ZCom process() call, since the shim's
+			// in-process ENet transport drains the whole connect handshake
+			// (connect reply + Lobby/PlayerSettings NODE_CREATE + the
+			// InitEvent round trip) in one go -- well before this activate()
+			// call ever runs on the main thread and registers as a Lobby
+			// listener (mClient->getLobby()->addListener(this), above). Any
+			// player already present at this point (in practice: our own
+			// entry) therefore never reached LobbyState::onJoin() and has no
+			// interceptor, so PlayerSettingsInterceptor::in/outPostUpdate()
+			// never has anything to call onPlayerUpdate() on -- silently
+			// dropping the one-time initial sync (editUser/setHovercraft)
+			// that onPlayerUpdate() would otherwise have delivered. Create
+			// the missing interceptor here, exactly like onJoin() does, for
+			// any player this instance hasn't already seen.
+			if (mPlayerInterceptors.find(player->getID()) == mPlayerInterceptors.end()) {
+				PlayerSettingsInterceptor* intercept = new PlayerSettingsInterceptor(player, this);
+				mPlayerInterceptors.insert(std::pair<int, PlayerSettingsInterceptor*>(player->getID(), intercept));
+			}
+		}
+
+		// Same reasoning as above: if onPlayerUpdate() was never dispatched
+		// for our own player, the hovercraft selection box was never told
+		// what we picked (only onPlayerUpdate() calls setHovercraft() for
+		// the local player -- see onPlayerUpdate() above). Make sure the
+		// selection box reflects our own already-configured choice now.
+		if (mLobby->getOwnPlayer()) {
+			mLobbyGUI->setHovercraft(mLobby->getOwnPlayer()->getHovercraftID(), mLobby->getOwnPlayer()->getHovercraft());
 		}
 
 		//Activate all possible interception listeners
@@ -236,6 +295,32 @@ namespace HovUni {
 
 	bool LobbyState::frameStarted(const Ogre::FrameEvent & evt) {
 		bool result = true;
+
+		// Test affordance (revival Phase B, docs/porting/phase-b-plan.md):
+		// --autostart lets a two-process test harness start the race itself
+		// once it reaches the lobby, with no GUI interaction. Admin status
+		// arrives over the network (it's granted by the server once our
+		// PlayerSettings/Lobby node has linked, see Lobby.cpp), so this polls
+		// isAdmin() every tick rather than giving up after the first one.
+		// Reuses the exact same mLobby->start() call as onPressStart() (the
+		// "Start" button) above. Without --autostart,
+		// Application::getAutoStart() is false and this whole block is a
+		// no-op: behaviour is unchanged from before this affordance existed.
+		if (!mAutoStartTriggered && Application::getAutoStart()) {
+			if (mLobby->isAdmin()) {
+				mAutoStartTriggered = true;
+
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[Autostart]: starting race as admin";
+
+				mLobby->start();
+			} else if (!mAutoStartWaitLogged) {
+				mAutoStartWaitLogged = true;
+
+				Ogre::LogManager::getSingletonPtr()->getDefaultLog()->stream()
+					<< "[Autostart]: waiting on admin status before starting the race";
+			}
+		}
 
 		mLastGUIUpdate += evt.timeSinceLastFrame;
 		mLastClientUpdate += evt.timeSinceLastFrame;

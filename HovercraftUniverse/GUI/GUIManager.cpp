@@ -7,7 +7,7 @@
 namespace HovUni {
 	GUIManager* GUIManager::msSingleton = 0;
 
-	GUIManager::GUIManager(const Ogre::String& mediaPath, Ogre::Viewport* viewport) 
+	GUIManager::GUIManager(const Ogre::String& mediaPath, Ogre::Viewport* viewport)
 			: mViewport(viewport), mMouseVisual(), mMouse(0), mMouseMoved(false) {
 		mHikariMgr = new Hikari::HikariManager(mediaPath.c_str());
 

@@ -5,10 +5,22 @@
 #include "Config.h"
 #include "OgreWindowListener.h"
 #include "EntityMapping.h"
+// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Root::showConfigDialog()
+// now requires an Ogre::ConfigDialog* (the old no-argument, built-in native
+// dialog overload is gone); OgreBites (already linked by hu_coreengine)
+// ships a drop-in native dialog via getNativeConfigDialog().
+#include <OgreBitesConfigDialog.h>
 
 namespace HovUni {
 Ogre::SceneManager* Application::msSceneMgr = 0;
 Config* Application::mConfig = 0;
+
+// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): see the
+// member declarations in Application.h.
+Ogre::String Application::msAutoConnectHost = "";
+unsigned int Application::msAutoConnectPort = 0;
+bool Application::msAutoConnect = false;
+bool Application::msAutoStart = false;
 
 Application::Application(Ogre::String appName, Ogre::String configINI) : mAppName(appName), mConfigINI(configINI) {
 	// All was initialized
@@ -37,7 +49,18 @@ void Application::init() {
 	setupInputSystem();
 }
 
-void Application::go(const Ogre::String& host, unsigned int port) {
+void Application::go(const Ogre::String& host, unsigned int port, bool autoConnect, bool autoStart) {
+	// Test affordance (revival Phase B, docs/porting/phase-b-plan.md): stash
+	// the --autoconnect target so MainMenuState can trigger the production
+	// onConnect() path itself once the menu state is ticking, without any
+	// GUI interaction. host/port used to be silently discarded here (see
+	// the commented-out body of createClient() below) -- this is the first
+	// thing that actually reads them.
+	msAutoConnectHost = host;
+	msAutoConnectPort = port;
+	msAutoConnect = autoConnect;
+	msAutoStart = autoStart;
+
 	setupScene();
 	createClient(host,port);
 	createFrameListener();
@@ -84,6 +107,25 @@ void Application::parseIni() {
 void Application::createRoot() {
 	mOgreRoot = new Ogre::Root(mOgrePlugins.c_str(), "ogre.cfg", mLogPath);
 	std::cout << "Creating log at " << mLogPath << std::endl;
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+	// OgreOverlaySystem.h include comment in Application.h -- must be
+	// constructed with Root created but not yet initialised.
+	mOverlaySystem = new Ogre::OverlaySystem();
+
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): see the
+	// DuplicateMaterialScriptCompilerListener.h include comment in
+	// Application.h. Installed here, right after Root (and therefore
+	// ScriptCompilerManager) exists but before defineResources()/
+	// initializeResourceGroups() parse a single script, so it covers every
+	// .material script Ogre compiles -- both at startup and for each
+	// race's "Track" resource group.
+	DuplicateMaterialScriptCompilerListener::install();
+
+	// Ogre 14 API fix / port workaround (docs/porting/ogre-api-gap.md): see
+	// the LegacyMeshLodListener.h include comment in Application.h. Installed
+	// here, alongside the other MeshManager/ScriptCompilerManager listener,
+	// so every mesh load is covered -- both at startup and per-race.
+	LegacyMeshLodListener::install();
 }
 
 void Application::defineResources() {
@@ -108,7 +150,7 @@ void Application::defineResources() {
 }
 
 void Application::setupRenderSystem() {
-	if (!mOgreRoot->restoreConfig() && !mOgreRoot->showConfigDialog()) {
+	if (!mOgreRoot->restoreConfig() && !mOgreRoot->showConfigDialog(OgreBites::getNativeConfigDialog())) {
 		// TODO Throw exception
 	}
 }
@@ -139,7 +181,16 @@ void Application::createClient(const Ogre::String& host, unsigned int port){
 
 void Application::setupScene() {
 	// Create scene manager
-	msSceneMgr = mOgreRoot->createSceneManager(Ogre::ST_GENERIC, "Default");
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): Ogre::ST_GENERIC / the
+	// SceneType-enum overload of createSceneManager no longer exists --
+	// modern Ogre selects a scene manager by its (string) factory type name.
+	msSceneMgr = mOgreRoot->createSceneManager("DefaultSceneManager", "Default");
+	// Ogre 14 API fix (docs/porting/ogre-api-gap.md): register the Overlay
+	// component's bootstrap object (created in createRoot()) as a
+	// RenderQueueListener on this scene manager -- required for
+	// Ogre::OverlayManager::getSingleton() to be valid at all (it did not
+	// need this manual step pre-1.9) and for overlays to actually render.
+	msSceneMgr->addRenderQueueListener(mOverlaySystem);
 	msSceneMgr->setShadowTechnique(Ogre::SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED);
 
 	// Get created window
@@ -168,7 +219,7 @@ void Application::setupScene() {
 	//TODO: The creation of a GameView should be moved to InGameState (Nick)//
 	//////////////////////////////////////////////////////////////////////////
     // Add single game view to representation manager and fix aspect ratio
-    
+
 	GameView * gv = new GameView(msSceneMgr);
     Ogre::Camera * cam = gv->getCamera()->getCamera();
     Ogre::Viewport * vp = win->addViewport(cam);
@@ -197,14 +248,41 @@ void Application::setupInputSystem() {
 }
 
 void Application::createFrameListener() {
-	//mFrameListener = new ApplicationFrameListener(mOgreRoot->getSceneManager("Default"), mEntityManager, mRepresentationManager, 
+	//mFrameListener = new ApplicationFrameListener(mOgreRoot->getSceneManager("Default"), mEntityManager, mRepresentationManager,
 	//	mInputManager, mClient);
 	//mOgreRoot->addFrameListener(mFrameListener);
 	mOgreRoot->addFrameListener(mGameStateMgr);
 }
 
 void Application::startRenderLoop() {
-	mOgreRoot->startRendering();
+	// Modern-build fix (docs/porting/first-run.md section 9.6): pump the Win32
+	// message queue ourselves.
+	//
+	// In Ogre 1.7, Root::startRendering() called
+	// WindowEventUtilities::messagePump() once per frame, so applications got
+	// message dispatch for free and this method was a one-liner. In Ogre 14
+	// startRendering() only loops renderOneFrame(), and messagePump() has moved
+	// out of OgreMain into the Bites component, where it is called solely by
+	// Ogre::ApplicationContext -- a framework this game does not use.
+	//
+	// The result was that nothing ever serviced the render window's message
+	// queue. Windows therefore reported the process as "not responding" from
+	// the moment it started (even while it was rendering perfectly), ghosted
+	// the window the instant the user interacted with it after any focus
+	// change, and starved input: OIS's DirectInput devices depend on window
+	// activation messages, so the game accepted clicks until the first
+	// alt-tab and was dead to mouse and keyboard from then on.
+	//
+	// renderOneFrame() returns false when a frame listener asks to stop, which
+	// is how the game quits (see GameStateManager), so this loop terminates on
+	// exactly the same condition startRendering() did.
+	while (true) {
+		Ogre::WindowEventUtilities::messagePump();
+
+		if (!mOgreRoot->renderOneFrame()) {
+			break;
+		}
+	}
 }
 
 }
